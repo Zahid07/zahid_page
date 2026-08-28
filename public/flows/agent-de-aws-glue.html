@@ -1,0 +1,879 @@
+<title>AWS Agentic DE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+  /* ---- light palette: complete, on bare :root ---- */
+  :root {
+    --paper:      #F1F3F2;
+    --surface:    #FAFBFA;
+    --surface-2:  #E7EBE9;
+    --ink:        #16201F;
+    --ink-2:      #3E4C4A;
+    --ink-3:      #6B7A77;
+    --rule:       #CFD8D5;
+    --rule-soft:  #DFE5E3;
+
+    --pine:       #0F6E63;   /* accent: flow, verified, the happy path */
+    --pine-soft:  #DCEBE8;
+    --amber:      #9A5B00;   /* needs a human */
+    --amber-soft: #F5E8D2;
+    --oxide:      #9E2B18;   /* silent wrong data */
+    --oxide-soft: #F6DED9;
+
+    --shadow: 0 1px 2px rgba(22,32,31,.06), 0 8px 24px -12px rgba(22,32,31,.18);
+  }
+
+  /* ---- dark: redefine tokens only ---- */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0E1413;
+      --surface:    #151D1C;
+      --surface-2:  #1E2827;
+      --ink:        #E4EAE8;
+      --ink-2:      #B0BEBB;
+      --ink-3:      #7F8F8C;
+      --rule:       #2C3937;
+      --rule-soft:  #222D2C;
+
+      --pine:       #5FC4B4;
+      --pine-soft:  #12312D;
+      --amber:      #D99A4E;
+      --amber-soft: #33240F;
+      --oxide:      #E08575;
+      --oxide-soft: #381914;
+
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #0E1413;
+    --surface:    #151D1C;
+    --surface-2:  #1E2827;
+    --ink:        #E4EAE8;
+    --ink-2:      #B0BEBB;
+    --ink-3:      #7F8F8C;
+    --rule:       #2C3937;
+    --rule-soft:  #222D2C;
+
+    --pine:       #5FC4B4;
+    --pine-soft:  #12312D;
+    --amber:      #D99A4E;
+    --amber-soft: #33240F;
+    --oxide:      #E08575;
+    --oxide-soft: #381914;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 24px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  .col  { max-width: 68ch; }
+
+  /* ---- type ---- */
+  h1, h2, h3, .label, .stage-n, th, .mono { font-family: "Archivo", "Helvetica Neue", Arial, sans-serif; }
+
+  h1 {
+    font-size: clamp(2.1rem, 5vw, 3.1rem);
+    font-weight: 700;
+    letter-spacing: -.025em;
+    line-height: 1.05;
+    text-wrap: balance;
+    margin: 0 0 .5rem;
+  }
+  h2 {
+    font-size: clamp(1.35rem, 2.4vw, 1.7rem);
+    font-weight: 600;
+    letter-spacing: -.015em;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h3 {
+    font-size: 1.02rem;
+    font-weight: 600;
+    letter-spacing: -.005em;
+    margin: 0 0 .4rem;
+  }
+  p { margin: 0 0 1.05rem; }
+  a { color: var(--pine); text-underline-offset: 3px; }
+  strong { font-weight: 600; }
+  em { font-style: italic; color: var(--ink-2); }
+
+  .label {
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .lede {
+    font-size: 1.16rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 60ch;
+  }
+
+  code, .mono, pre { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+  code {
+    font-size: .85em;
+    background: var(--surface-2);
+    padding: .12em .38em;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 6px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: .82rem;
+    line-height: 1.6;
+    margin: 0;
+    color: var(--ink-2);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  /* ---- structure ---- */
+  header.masthead {
+    padding: 72px 0 40px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 8px;
+  }
+  .kicker {
+    display: flex; gap: 14px; align-items: baseline;
+    margin-bottom: 22px; flex-wrap: wrap;
+  }
+  .kicker .sep { color: var(--rule); }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--rule-soft); }
+  section:last-of-type { border-bottom: none; }
+  .sec-head { display: flex; gap: 18px; align-items: baseline; margin-bottom: 28px; }
+  .sec-head .num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; font-weight: 700;
+    color: var(--pine);
+    padding-top: .35em;
+  }
+
+  .stack { display: flex; flex-direction: column; gap: 14px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+
+  /* ---- pipeline: order carries meaning, so it is numbered ---- */
+  .pipeline { display: flex; flex-direction: column; gap: 0; margin-top: 8px; }
+
+  .stage {
+    display: grid;
+    grid-template-columns: 58px 1fr;
+    gap: 22px;
+    position: relative;
+    padding: 22px 0;
+  }
+  .stage:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: 28px; top: 56px; bottom: -6px;
+    width: 2px;
+    background: linear-gradient(var(--rule), var(--rule-soft));
+  }
+  .stage-n {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--surface);
+    border: 2px solid var(--rule);
+    font-size: .82rem; font-weight: 700;
+    color: var(--ink-2);
+    position: relative; z-index: 1;
+  }
+  .stage.offline .stage-n { border-color: var(--pine); color: var(--pine); }
+  .stage.aws .stage-n { border-color: var(--amber); color: var(--amber); }
+
+  .stage-body { padding-top: 4px; min-width: 0; }
+  .stage-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  .stage-body p { margin-bottom: .7rem; max-width: 62ch; }
+
+  .chip {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .64rem; font-weight: 500;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: .25em .6em; border-radius: 3px;
+    white-space: nowrap;
+  }
+  .chip.offline { background: var(--pine-soft); color: var(--pine); }
+  .chip.aws     { background: var(--amber-soft); color: var(--amber); }
+
+  .gate {
+    border-left: 3px solid var(--oxide);
+    background: var(--oxide-soft);
+    padding: 10px 14px;
+    border-radius: 0 4px 4px 0;
+    font-size: .9rem;
+    color: var(--ink);
+    max-width: 62ch;
+  }
+  .gate .label { color: var(--oxide); display: block; margin-bottom: 2px; }
+
+  /* ---- tables ---- */
+  .t-wrap { overflow-x: auto; border: 1px solid var(--rule-soft); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th {
+    text-align: left;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { color: var(--ink); }
+  td.num { font-family: "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+
+  .sev {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .66rem; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase;
+    padding: .2em .5em; border-radius: 3px; white-space: nowrap;
+  }
+  .sev.silent { background: var(--oxide-soft); color: var(--oxide); }
+  .sev.loud   { background: var(--amber-soft); color: var(--amber); }
+  .sev.waste  { background: var(--surface-2); color: var(--ink-3); }
+
+  /* ---- file map ---- */
+  .filemap {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .frow {
+    display: grid;
+    grid-template-columns: minmax(190px, 240px) 1fr;
+    gap: 20px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--rule-soft);
+    align-items: baseline;
+  }
+  .frow:last-child { border-bottom: none; }
+  .frow .path {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .8rem;
+    color: var(--pine);
+    word-break: break-word;
+  }
+  .frow .what { font-size: .93rem; color: var(--ink-2); }
+  .frow .what b { color: var(--ink); font-weight: 600; }
+
+  /* ---- permission tiers ---- */
+  .tiers { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .tier {
+    border: 1px solid var(--rule);
+    border-top-width: 3px;
+    border-radius: 6px;
+    padding: 16px 18px;
+    background: var(--surface);
+  }
+  .tier.allow { border-top-color: var(--pine); }
+  .tier.ask   { border-top-color: var(--amber); }
+  .tier.deny  { border-top-color: var(--oxide); }
+  .tier h3 { margin-bottom: 8px; }
+  .tier ul { margin: 0; padding-left: 1.1em; font-size: .88rem; color: var(--ink-2); }
+  .tier li { margin-bottom: 5px; }
+  .tier li code { font-size: .78em; }
+
+  /* ---- callout ---- */
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--pine);
+    border-radius: 0 6px 6px 0;
+    padding: 16px 20px;
+    max-width: 66ch;
+  }
+  .note p:last-child { margin-bottom: 0; }
+
+  .result-pass { color: var(--pine); font-weight: 600; }
+  .result-fail { color: var(--oxide); font-weight: 600; }
+
+  footer {
+    padding-top: 40px;
+    color: var(--ink-3);
+    font-size: .88rem;
+    border-top: 1px solid var(--rule-soft);
+    margin-top: 20px;
+  }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; padding: 0 18px 64px; }
+    .stage { grid-template-columns: 40px 1fr; gap: 16px; }
+    .stage-n { width: 40px; height: 40px; font-size: .72rem; }
+    .stage:not(:last-child)::after { left: 19px; top: 42px; }
+    .frow { grid-template-columns: 1fr; gap: 4px; }
+    .sec-head { gap: 12px; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: opacity .15s ease; }
+    a:hover { opacity: .75; }
+  }
+  :focus-visible { outline: 2px solid var(--pine); outline-offset: 2px; border-radius: 2px; }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="kicker">
+      <span class="label">AWS Agentic DE</span>
+      <span class="sep">/</span>
+      <span class="label">Oracle → Iceberg bronze → Glue silver</span>
+    </div>
+    <h1>How the agent is written,<br>and how it works</h1>
+    <p class="lede">
+      A framework that encodes what this pipeline has already taught us, so a session
+      starts knowing the rules instead of rediscovering them in CloudWatch three weeks later.
+    </p>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">01</span>
+      <h2>The shape of the system</h2>
+    </div>
+    <div class="col">
+      <p>
+        Reference SQL is exported from the LDM into <code>input/&lt;module&gt;/*.sql</code>.
+        A generator turns it into deployable Glue jobs. Those jobs build an Iceberg star
+        schema on top of a bronze layer ingested from Oracle.
+      </p>
+      <p>
+        Three facts about this shape drive every rule that follows:
+      </p>
+    </div>
+    <div class="grid-2" style="margin-top:22px">
+      <div class="note">
+        <h3>Generated output is not source</h3>
+        <p style="font-size:.93rem;color:var(--ink-2)">
+          Everything under <code>new_silver/</code> and every <code>input/**/*.sql</code>
+          says <em>Do not hand-edit</em>. A defect there is a defect in the generator.
+          Patch the artifact and the next run silently reverts you.
+        </p>
+      </div>
+      <div class="note">
+        <h3>Correctness is checkable offline</h3>
+        <p style="font-size:.93rem;color:var(--ink-2)">
+          The invariant audit needs no credentials and runs in seconds. It catches the
+          class of bug that otherwise surfaces as a wrong number long after anyone
+          remembers the change that caused it.
+        </p>
+      </div>
+      <div class="note">
+        <h3>The agent prepares, the operator executes</h3>
+        <p style="font-size:.93rem;color:var(--ink-2)">
+          Anything that changes AWS or deletes data is handed over as a command, not run.
+          Credentials live in the operator's shell.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">02</span>
+      <h2>The flow</h2>
+    </div>
+    <div class="col">
+      <p>
+        Five stages. The order is not a preference — each stage depends on the one before,
+        and the gates between them are what stop a bad build reaching data.
+      </p>
+    </div>
+
+    <div class="pipeline">
+
+      <div class="stage offline">
+        <div class="stage-n">01</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Generate</h3>
+            <span class="chip offline">offline</span>
+          </div>
+          <p>
+            Reference SQL → job scripts plus a <code>create_job</code> payload. The load
+            pattern comes from the SQL header's <code>Construct</code> / <code>Key</code> /
+            <code>Load</code> fields, never inferred from a table name.
+          </p>
+          <p>
+            Scope is one module. <code>--only</code> narrows further and merges into the
+            existing index rather than truncating it.
+          </p>
+          <div class="gate">
+            <span class="label">Gate</span>
+            Regenerating a module the operator did not name overwrites work they may be
+            mid-review on. Confirm the scope before writing.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage offline">
+        <div class="stage-n">02</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Audit</h3>
+            <span class="chip offline">offline</span>
+          </div>
+          <p>
+            Every generated script checked against the invariants: duplicate projection
+            aliases, CTE ordering, decimal bounds, self-referencing DDL, JSON fold
+            stability, dims that delete.
+          </p>
+          <div class="gate">
+            <span class="label">Gate — never skipped</span>
+            A failure here stops the pipeline. The fix goes in the generator and the module
+            is regenerated; the artifact is never patched.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage aws">
+        <div class="stage-n">03</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Deploy</h3>
+            <span class="chip aws">operator runs</span>
+          </div>
+          <p>
+            Script to S3, then create or update the job. The <code>job</code> block is
+            passed to <code>create_job</code> verbatim — nothing is invented at deploy time.
+            Dims before facts.
+          </p>
+          <div class="gate">
+            <span class="label">Gate</span>
+            <code>--dry-run</code> first, and show the operator the plan. They run the real
+            thing.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage aws">
+        <div class="stage-n">04</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Run in lineage waves</h3>
+            <span class="chip aws">operator runs</span>
+          </div>
+          <p>
+            Waves are derived from the jobs themselves — real joins recorded in
+            <code>readsSilverTables</code>, plus raw FK carries — not from a hand-written
+            list, so they stay correct as the module changes. Jobs inside a wave run in
+            parallel.
+          </p>
+          <div class="gate">
+            <span class="label">Gate</span>
+            A failing job is reported, not retried, and everything downstream is skipped
+            rather than run into a guaranteed failure.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage aws">
+        <div class="stage-n">05</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Verify twice</h3>
+            <span class="chip aws">destructive</span>
+          </div>
+          <p>
+            Wipe, deploy, run, count, settle, run again, count again, compare. A second run
+            over unchanged source must not change any row count.
+          </p>
+          <p>
+            <strong>A table that grows on run 2 is a real defect</strong> — a join fanning
+            out, a duplicated SCD2 version, or a surrogate key being renumbered. That is
+            exactly the class of bug this catches.
+          </p>
+          <div class="gate">
+            <span class="label">Gate — irreversible</span>
+            The wipe drops Glue tables <em>and purges their S3 locations</em>: Iceberg keeps
+            metadata at the table LOCATION, so a catalog-only drop leaves snapshots for the
+            next <code>CREATE TABLE</code> to inherit. It refuses to run without
+            <code>--yes</code>, and refuses any S3 prefix not containing the table's own
+            name. The agent never passes <code>--yes</code>.
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">03</span>
+      <h2>What to write</h2>
+    </div>
+    <div class="col">
+      <p>
+        The framework is six kinds of file, each doing a job the others cannot. The split
+        matters: rules that belong in a hook do not work as prose, and knowledge that
+        belongs in a skill is wasted in a hook.
+      </p>
+    </div>
+
+    <div class="filemap" style="margin-top:8px">
+      <div class="frow">
+        <div class="path">CLAUDE.md</div>
+        <div class="what">
+          <b>The contract.</b> Loaded every session, so it holds only what is always true:
+          ground rules, layout, the five load patterns, the twelve invariants in summary,
+          and the destructive-operation protocol. Not a tutorial — everything here is
+          load-bearing.
+        </div>
+      </div>
+      <div class="frow">
+        <div class="path">.claude/skills/*/SKILL.md</div>
+        <div class="what">
+          <b>Deep knowledge, loaded on demand.</b> One per task shape — generating a
+          module, deploying, diagnosing a run, bronze ingestion, the invariants. The
+          <code>description</code> is what decides whether a skill loads, so it names the
+          symptoms, not the topic.
+        </div>
+      </div>
+      <div class="frow">
+        <div class="path">.claude/skills/sql-invariants/audit.py</div>
+        <div class="what">
+          <b>Executable rules.</b> A rule that can be checked by a script should be, not
+          described in prose and hoped for. Offline, standard library only, non-zero exit
+          so it drops into a pre-deploy gate.
+        </div>
+      </div>
+      <div class="frow">
+        <div class="path">.claude/hooks/*.py</div>
+        <div class="what">
+          <b>Enforcement.</b> <code>guard_destructive</code> blocks irreversible commands
+          before they run; <code>check_invariants</code> catches a regression the moment a
+          file is edited. Hooks are the harness acting, not the agent choosing — which is
+          why the rules that must never be negotiated live here.
+        </div>
+      </div>
+      <div class="frow">
+        <div class="path">.claude/agents/*.md</div>
+        <div class="what">
+          <b>Bounded reviewers.</b> <code>sql-auditor</code> is read-only by construction,
+          so it cannot alter what it inspects. <code>log-forensics</code> exists to
+          separate a terminal error from recoverable noise.
+        </div>
+      </div>
+      <div class="frow">
+        <div class="path">.claude/commands/*.md</div>
+        <div class="what">
+          <b>The sequences worth naming.</b> <code>/audit &lt;module&gt;</code> and
+          <code>/ship &lt;module&gt;</code> — the multi-step flows that are easy to
+          half-perform from memory.
+        </div>
+      </div>
+      <div class="frow">
+        <div class="path">docs/INVARIANTS.md</div>
+        <div class="what">
+          <b>The reasoning, kept.</b> Every rule with the case that produced it, including
+          one <em>rejected</em> approach — the window <code>DELETE</code> — recorded
+          because a reasonable person will propose it again.
+        </div>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:24px">
+      <p>
+        <strong>The test for where something belongs:</strong> if violating it is always
+        wrong, it goes in a hook. If it needs judgment, it goes in a skill. If it is true
+        of every task, it goes in <code>CLAUDE.md</code>. If it explains <em>why</em>, it
+        goes in <code>docs/</code> — where it can be long.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">04</span>
+      <h2>How the agent works</h2>
+    </div>
+    <div class="col">
+      <p>
+        Behaviour is governed in three tiers, declared in
+        <code>.claude/settings.json</code>. The tier a command falls into is a statement
+        about reversibility, not about difficulty.
+      </p>
+    </div>
+
+    <div class="tiers" style="margin-top:22px">
+      <div class="tier allow">
+        <h3>Allowed outright</h3>
+        <ul>
+          <li>Reading anything in the repo</li>
+          <li><code>--dry-run</code> on every tool</li>
+          <li>The offline audit</li>
+          <li>Inspection: <code>ls</code>, <code>grep</code>, <code>diff</code></li>
+        </ul>
+      </div>
+      <div class="tier ask">
+        <h3>Asks first</h3>
+        <ul>
+          <li>Generating a module (it overwrites)</li>
+          <li><code>deploy_job.py</code> for real</li>
+          <li>Starting a run via <code>watch_job.py</code></li>
+          <li>Editing anything in <code>glue-tools/</code></li>
+        </ul>
+      </div>
+      <div class="tier deny">
+        <h3>Blocked</h3>
+        <ul>
+          <li><code>verify_module.py --yes</code></li>
+          <li><code>aws s3 rm</code>, <code>aws glue delete-*</code></li>
+          <li>Writing to <code>new_silver/</code>, <code>silver/</code>, <code>input/**/*.sql</code></li>
+          <li>Reading credentials</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="col" style="margin-top:34px">
+      <h3>Reading a failure</h3>
+      <p>
+        Most of the alarming text in a Glue log is recoverable. The agent ranks by log
+        level, not by tone — and the driver/executor distinction resolves most Oracle
+        questions on its own, because partition settings fan out on executors and never
+        touch the driver's single connection.
+      </p>
+    </div>
+    <div class="t-wrap" style="margin-top:14px">
+      <table>
+        <thead>
+          <tr><th>Signal</th><th>What it actually means</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono" style="font-size:.82rem">will be trying with next available connect option</td>
+            <td><strong>INFO, usually not the failure.</strong> The driver is walking a multi-address descriptor and failing over. It logs on every connection, forever, while the job works fine. A failure only when no address answers.</td>
+          </tr>
+          <tr>
+            <td class="mono" style="font-size:.82rem">no log events at all</td>
+            <td>Died at bootstrap and never reached the script — connections, or <code>--additional-python-modules</code> with no PyPI route in the VPC. This is why Run Details looks blank.</td>
+          </tr>
+          <tr>
+            <td class="mono" style="font-size:.82rem">cancelled as part of cancellation of all jobs</td>
+            <td>The DAGScheduler died. The real error is an <code>IllegalArgumentException</code> just above it.</td>
+          </tr>
+          <tr>
+            <td class="mono" style="font-size:.82rem">ORA-17002, connect lapse 130 ms</td>
+            <td>Connected, then died before auth — a network path, not a password. Usually one cursor streaming a whole table because a partition spec was half-configured.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col" style="margin-top:34px">
+      <h3>Reporting</h3>
+      <p>
+        Outcomes are reported faithfully: a failure shows its output, a skipped step is
+        named, and something verified is stated plainly without hedging. The agent never
+        describes a run it did not see. Scope that was narrowed is always declared — a
+        partial result stated is fine, a partial result implied is not.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">05</span>
+      <h2>The invariants</h2>
+    </div>
+    <div class="col">
+      <p>
+        Twelve rules, each from a real defect. Severity is by failure mode, because it
+        governs how hard to look: <span class="sev silent">silent</span> produces wrong
+        data with no error, <span class="sev loud">loud</span> fails the job and announces
+        itself, <span class="sev waste">waste</span> is correct but costly.
+      </p>
+    </div>
+
+    <div class="t-wrap" style="margin-top:18px">
+      <table>
+        <thead>
+          <tr><th>Rule</th><th>Severity</th><th>The case that produced it</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Identifiers with <code>#</code> are backticked</td>
+            <td><span class="sev silent">silent</span></td>
+            <td><code>PRD_WTNOTE_DTL#2</code> truncated at the <code>#</code> and resolved to a <em>different table that exists</em>. The job succeeded and loaded the wrong data.</td>
+          </tr>
+          <tr>
+            <td>CDC watermark follows the predicate's qualifier</td>
+            <td><span class="sev silent">silent</span></td>
+            <td>A fact projecting <code>tran_date</code> from four tables read its watermark from <code>t1</code> while filtering on <code>d</code>. The watermark drifts; rows are skipped forever.</td>
+          </tr>
+          <tr>
+            <td><code>SORT_ARRAY</code> in every JSON fold</td>
+            <td><span class="sev silent">silent</span></td>
+            <td><code>COLLECT_LIST</code> has no defined order. The JSON feeds <code>row_hash</code>, so an unstable string mints a new SCD2 version every run — the dimension grows with no source change.</td>
+          </tr>
+          <tr>
+            <td>Dead <code>LEFT JOIN</code>s pruned, <code>INNER</code> never</td>
+            <td><span class="sev silent">silent</span></td>
+            <td>A dim declared six source tables; four supplied nothing. A <code>LEFT JOIN</code> matching more than one row silently multiplies the fact. An <code>INNER</code> filters rows even when it contributes none, so removing one changes the result.</td>
+          </tr>
+          <tr>
+            <td>Dims never <code>DELETE</code></td>
+            <td><span class="sev silent">silent</span></td>
+            <td>SCD2 is insert-only. Deleting destroys history no rebuild can reconstruct.</td>
+          </tr>
+          <tr>
+            <td><code>cutoff</code> captured before the <code>DELETE</code></td>
+            <td><span class="sev silent">silent</span></td>
+            <td>Re-reading <code>MAX()</code> inline afterwards reads a table the delete already touched.</td>
+          </tr>
+          <tr>
+            <td>No duplicate projection alias</td>
+            <td><span class="sev loud">loud</span></td>
+            <td>20 collisions across the corpus. A CTAS takes its column names from the projection, so two columns with one name is a table that cannot be created.</td>
+          </tr>
+          <tr>
+            <td><code>0 ≤ scale ≤ precision ≤ 38</code></td>
+            <td><span class="sev loud">loud</span></td>
+            <td>Spark's ceiling. In a JDBC <code>customSchema</code> — parsed as one string — a single <code>decimal(39,2)</code> fails the whole table, not the column.</td>
+          </tr>
+          <tr>
+            <td>Never set <code>spark.task.maxFailures</code></td>
+            <td><span class="sev loud">loud</span></td>
+            <td>Glue requires it strictly greater than <code>maxTaskAttemptsPerNode</code> (2). Setting it to 2 cancels every job at the first query, naming neither property. Cost an afternoon.</td>
+          </tr>
+          <tr>
+            <td>CTEs defined before use</td>
+            <td><span class="sev loud">loud</span></td>
+            <td>Generated <code>_current</code> CTEs were appended to the <code>WITH</code> list but referenced by an earlier one. Nine jobs affected.</td>
+          </tr>
+          <tr>
+            <td>Create-table DDL never reads its own table</td>
+            <td><span class="sev loud">loud</span></td>
+            <td>The watermark subquery, emitted into <code>CREATE TABLE</code>, reads a table that does not exist yet.</td>
+          </tr>
+          <tr>
+            <td>Ambiguous columns qualified</td>
+            <td><span class="sev loud">loud</span></td>
+            <td><code>WHERE item_code_nk IS NOT NULL</code> where two CTEs both expose it.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col" style="margin-top:30px">
+      <h3>One rule, three fixes</h3>
+      <p>
+        The duplicate-column rule is worth expanding, because it is the one where the
+        obvious fix is mostly wrong. Three different causes hide behind one symptom:
+      </p>
+    </div>
+    <div class="t-wrap" style="margin-top:14px">
+      <table>
+        <thead>
+          <tr><th>Cause</th><th class="num">Seen</th><th>Fix</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Same expression projected twice<br><code>s.cost_code AS cost_code</code> ×2</td>
+            <td class="num">11</td>
+            <td>Keep the first, drop repeats. A prefix would leave two identical columns.</td>
+          </tr>
+          <tr>
+            <td>NULL placeholder beside a real expression<br><code>NULL</code> + <code>current_timestamp()</code></td>
+            <td class="num">5</td>
+            <td>Drop the placeholder. There is no table to name a literal after.</td>
+          </tr>
+          <tr>
+            <td>Different tables, same name<br><code>d.tran_date</code> vs <code>h.tran_date</code></td>
+            <td class="num">4</td>
+            <td>Prefix with the table's last name token → <code>dtl_tran_date</code>, <code>mst_tran_date</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="col" style="margin-top:16px">
+      <p>
+        Applying the prefix rule to all three — the intuitive fix — would have corrected
+        4 cases and corrupted the other 16.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">06</span>
+      <h2>A worked example</h2>
+    </div>
+    <div class="col">
+      <p>
+        The audit was run against all five generated modules while this framework was
+        written. Four pass. One does not, and it is the useful one.
+      </p>
+    </div>
+
+    <div class="t-wrap" style="margin-top:18px">
+      <table>
+        <thead>
+          <tr><th>Module</th><th>Result</th><th>Why</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="mono">fgs</td><td class="result-pass">PASS</td><td>Regenerated after the duplicate-column fix</td></tr>
+          <tr><td class="mono">knitting</td><td class="result-pass">PASS</td><td>—</td></tr>
+          <tr><td class="mono">planning</td><td class="result-pass">PASS</td><td>—</td></tr>
+          <tr><td class="mono">shared</td><td class="result-pass">PASS</td><td>—</td></tr>
+          <tr>
+            <td class="mono">finishing</td>
+            <td class="result-fail">14 findings</td>
+            <td><code>Fact_Finopn</code> and <code>Fact_Cellwiseemp</code> still carry duplicate <code>active</code> and <code>tran_date</code> columns — generated before the fix, and deliberately not regenerated.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col" style="margin-top:24px">
+      <p>
+        That makes <code>finishing</code> the framework's own test case. It also carries
+        the latent watermark bug: <code>Fact_Finopn</code> is CDC on <code>TRAN_DATE</code>
+        and projects it from four tables, so deduplicating the aliases is what turns an
+        invisible ambiguity into a choice that has to be made correctly.
+      </p>
+    </div>
+
+    <pre style="margin-top:8px"><code>/audit finishing        # see the 14 findings and the warnings behind them
+/ship finishing         # regenerate, re-audit, hand over the deploy commands</code></pre>
+  </section>
+
+  <footer>
+    <p style="margin:0">
+      Rules and cases drawn from the generator, the bronze ingestion job, and the six
+      tools in <code>glue-tools/</code>. Every invariant here is traceable to a defect
+      that reached a running job.
+    </p>
+  </footer>
+
+</div>

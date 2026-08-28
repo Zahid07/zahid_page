@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simple Store Lakehouse — how the pipeline works</title>
+<meta name="description" content="A course-built e-commerce lakehouse: MySQL as the operational source, Debezium CDC beside a config-driven Trino medallion pipeline, Kimball gold in Delta Lake and ClickHouse.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+  :root {
+    --paper: #F3F4F1;
+    --surface: #FBFCFA;
+    --surface-2: #E8EBE6;
+    --ink: #161C18;
+    --ink-2: #3E4A43;
+    --ink-3: #6B766F;
+    --rule: #D4DAD4;
+    --rule-soft: #E2E6E1;
+    --rule-strong: #B7C0B8;
+    --pine: #1A6B5C;
+    --pine-soft: #DCEBE6;
+    --amber: #8F5A12;
+    --amber-soft: #F4E9D6;
+    --oxide: #9A3A2A;
+    --oxide-soft: #F4E2DD;
+    --cool: #3A5F72;
+    --cool-soft: #DCE7ED;
+    --shadow: 0 1px 2px rgba(22,28,24,.06), 0 10px 28px -14px rgba(22,28,24,.28);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0F1412;
+      --surface: #161C19;
+      --surface-2: #1E2622;
+      --ink: #E6EBE6;
+      --ink-2: #B0B8B2;
+      --ink-3: #7E8882;
+      --rule: #2A3430;
+      --rule-soft: #222A27;
+      --rule-strong: #3A463F;
+      --pine: #5FBEAB;
+      --pine-soft: #14302B;
+      --amber: #D4A056;
+      --amber-soft: #32240F;
+      --oxide: #E08A78;
+      --oxide-soft: #331C18;
+      --cool: #7EB0C6;
+      --cool-soft: #17303A;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -14px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0F1412;
+    --surface: #161C19;
+    --surface-2: #1E2622;
+    --ink: #E6EBE6;
+    --ink-2: #B0B8B2;
+    --ink-3: #7E8882;
+    --rule: #2A3430;
+    --rule-soft: #222A27;
+    --rule-strong: #3A463F;
+    --pine: #5FBEAB;
+    --pine-soft: #14302B;
+    --amber: #D4A056;
+    --amber-soft: #32240F;
+    --oxide: #E08A78;
+    --oxide-soft: #331C18;
+    --cool: #7EB0C6;
+    --cool-soft: #17303A;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -14px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    margin: 0;
+    padding: 0 24px 96px;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1140px; margin: 0 auto; }
+  .col { max-width: 68ch; }
+
+  h1, h2, h3, .label, .stage-n, th, .l {
+    font-family: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  }
+
+  h1 {
+    font-size: clamp(2.15rem, 5vw, 3.15rem);
+    font-weight: 700;
+    letter-spacing: -.026em;
+    line-height: 1.05;
+    text-wrap: balance;
+    margin: 0 0 .55rem;
+  }
+  h2 {
+    font-size: clamp(1.38rem, 2.5vw, 1.72rem);
+    font-weight: 600;
+    letter-spacing: -.015em;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h3 {
+    font-size: 1.04rem;
+    font-weight: 600;
+    letter-spacing: -.005em;
+    margin: 0 0 .4rem;
+  }
+  p { margin: 0 0 1.05rem; }
+  p:last-child { margin-bottom: 0; }
+  a { color: var(--pine); text-underline-offset: 3px; }
+  strong { font-weight: 600; color: var(--ink); }
+  em { font-style: italic; color: var(--ink-2); }
+
+  .label {
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .lede {
+    font-size: 1.16rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 62ch;
+  }
+
+  code, .mono, pre, .m, .s {
+    font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  code {
+    font-size: .85em;
+    background: var(--surface-2);
+    padding: .12em .38em;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 6px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: .8rem;
+    line-height: 1.6;
+    margin: 0 0 1.2rem;
+    color: var(--ink-2);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  header.masthead {
+    padding: 72px 0 36px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .kicker {
+    display: flex; gap: 14px; align-items: baseline;
+    margin-bottom: 22px; flex-wrap: wrap;
+  }
+  .kicker .sep { color: var(--rule); }
+
+  .byline {
+    margin-top: 1.8rem;
+    display: flex; flex-wrap: wrap; gap: .5rem 1.4rem;
+    font-family: "JetBrains Mono", monospace;
+    font-size: .74rem;
+    color: var(--ink-3);
+  }
+  .byline span { display: inline-flex; align-items: center; gap: .42rem; }
+  .byline span::before {
+    content: ""; width: 5px; height: 5px;
+    background: var(--pine); border-radius: 50%; flex: none;
+  }
+
+  .strip {
+    display: flex; gap: .4rem;
+    overflow-x: auto;
+    padding: 1.35rem 0 1.1rem;
+    margin-bottom: 4px;
+    scrollbar-width: thin;
+  }
+  .stage-chip {
+    flex: 1 1 0; min-width: 108px;
+    text-decoration: none; color: inherit;
+    border: 1px solid var(--rule); border-radius: 4px;
+    background: var(--surface);
+    padding: .58rem .68rem .62rem;
+    display: block;
+  }
+  .stage-chip:hover { border-color: var(--pine); }
+  .stage-chip .n {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .68rem; color: var(--pine); font-weight: 500;
+  }
+  .stage-chip .t {
+    display: block; font-family: "Archivo", sans-serif;
+    font-size: .78rem; font-weight: 600; margin-top: .16rem;
+  }
+  .stage-chip .m {
+    display: block; font-size: .66rem; color: var(--ink-3); margin-top: .28rem;
+  }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--rule-soft); }
+  section:last-of-type { border-bottom: none; }
+  .sec-head { display: flex; gap: 18px; align-items: baseline; margin-bottom: 28px; }
+  .sec-head .num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; font-weight: 700;
+    color: var(--pine); padding-top: .35em;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+
+  figure {
+    margin: 1.8rem 0 1.1rem;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 1.4rem 1.2rem 1rem;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  figcaption {
+    font-family: "IBM Plex Sans", "Archivo", sans-serif;
+    font-size: .78rem;
+    color: var(--ink-3);
+    margin-top: 1rem;
+    padding-top: .85rem;
+    border-top: 1px solid var(--rule);
+    line-height: 1.5;
+    max-width: 78ch;
+  }
+  figcaption b { color: var(--ink); font-weight: 600; }
+  svg { display: block; max-width: 100%; height: auto; }
+  .l { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .m { font-size: 11px; }
+  .s { font-size: 10px; }
+
+  .pipeline { display: flex; flex-direction: column; gap: 0; margin-top: 8px; }
+  .stage {
+    display: grid;
+    grid-template-columns: 58px 1fr;
+    gap: 22px;
+    position: relative;
+    padding: 22px 0;
+  }
+  .stage:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: 28px; top: 56px; bottom: -6px;
+    width: 2px;
+    background: linear-gradient(var(--rule), var(--rule-soft));
+  }
+  .stage-n {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--surface);
+    border: 2px solid var(--rule);
+    font-size: .82rem; font-weight: 700;
+    color: var(--ink-2);
+    position: relative; z-index: 1;
+  }
+  .stage.pine .stage-n { border-color: var(--pine); color: var(--pine); }
+  .stage.amber .stage-n { border-color: var(--amber); color: var(--amber); }
+  .stage.cool .stage-n { border-color: var(--cool); color: var(--cool); }
+  .stage-body { padding-top: 4px; min-width: 0; }
+  .stage-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  .stage-body p { margin-bottom: .7rem; max-width: 64ch; }
+
+  .chip {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .64rem; font-weight: 500;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: .25em .6em; border-radius: 3px;
+    white-space: nowrap;
+  }
+  .chip.pine { background: var(--pine-soft); color: var(--pine); }
+  .chip.amber { background: var(--amber-soft); color: var(--amber); }
+  .chip.cool { background: var(--cool-soft); color: var(--cool); }
+  .chip.oxide { background: var(--oxide-soft); color: var(--oxide); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 8px;
+    padding: 18px 20px;
+  }
+  .card h3 { margin-bottom: .45rem; }
+  .card p, .card ul { color: var(--ink-2); font-size: .95rem; }
+  .card .label { margin-bottom: .45rem; display: block; }
+
+  .note {
+    border-left: 3px solid var(--pine);
+    background: var(--surface);
+    padding: 1.05rem 1.25rem;
+    margin: 1.5rem 0;
+    border-radius: 0 5px 5px 0;
+  }
+  .note.warn { border-left-color: var(--amber); }
+  .note .hd {
+    font-family: "Archivo", sans-serif;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--pine); margin: 0 0 .4rem;
+  }
+  .note.warn .hd { color: var(--amber); }
+
+  .t-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--rule-soft);
+    border-radius: 6px;
+    background: var(--surface);
+  }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th {
+    text-align: left;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { color: var(--ink); }
+  td.mono { font-family: "JetBrains Mono", monospace; font-size: .8rem; color: var(--ink); }
+
+  ul { margin: 0 0 1.05rem; padding-left: 1.25rem; }
+  li { margin-bottom: .38rem; }
+  .filemap {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .frow {
+    display: grid;
+    grid-template-columns: minmax(170px, 230px) 1fr;
+    gap: 18px;
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--rule-soft);
+    align-items: baseline;
+  }
+  .frow:last-child { border-bottom: none; }
+  .frow .path {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .76rem;
+    color: var(--pine);
+  }
+  .frow p { margin: 0; font-size: .9rem; color: var(--ink-2); }
+
+  .theme-btn {
+    position: fixed; top: 16px; right: 16px; z-index: 20;
+    font-family: "Archivo", sans-serif;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase;
+    background: var(--surface);
+    color: var(--ink-2);
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    padding: .45rem .8rem;
+    cursor: pointer;
+    box-shadow: var(--shadow);
+  }
+  .theme-btn:hover { border-color: var(--pine); color: var(--pine); }
+
+  footer {
+    margin-top: 2.4rem;
+    padding-top: 1.4rem;
+    border-top: 1px solid var(--rule);
+    font-family: "IBM Plex Sans", "Archivo", sans-serif;
+    font-size: .8rem;
+    color: var(--ink-3);
+  }
+  :focus-visible { outline: 2px solid var(--pine); outline-offset: 3px; }
+
+  @media (max-width: 720px) {
+    .stage { grid-template-columns: 44px 1fr; gap: 14px; }
+    .stage-n { width: 44px; height: 44px; font-size: .72rem; }
+    .stage:not(:last-child)::after { left: 21px; }
+    .frow { grid-template-columns: 1fr; gap: 4px; }
+  }
+</style>
+</head>
+<body>
+<button class="theme-btn" type="button" id="themeToggle" aria-label="Toggle color theme">Theme</button>
+
+<div class="wrap">
+
+<header class="masthead">
+  <div class="kicker">
+    <span class="label">Åbo Akademi</span>
+    <span class="sep">/</span>
+    <span class="label">Data-Driven Computing Architecture</span>
+    <span class="sep">/</span>
+    <span class="label">Course project</span>
+  </div>
+  <h1>How the Simple Store lakehouse works</h1>
+  <p class="lede">
+    An e-commerce OLTP system writes to MySQL. A config-driven Airflow mesh then
+    pulls those tables through Trino into a Delta Lake medallion, builds a Kimball
+    star, serves ClickHouse aggregations, and forecasts the next five days of product demand.
+  </p>
+  <div class="byline">
+    <span>Five source tables</span>
+    <span>Bronze → Silver → Gold</span>
+    <span>Trino as the compute plane</span>
+    <span>Airflow Datasets as the DAG graph</span>
+  </div>
+</header>
+
+<nav class="strip" aria-label="Pipeline stages">
+  <a class="stage-chip" href="#problem"><span class="n">01</span><span class="t">Problem</span><span class="m">OLTP vs analytics</span></a>
+  <a class="stage-chip" href="#architecture"><span class="n">02</span><span class="t">Architecture</span><span class="m">two paths from MySQL</span></a>
+  <a class="stage-chip" href="#pipeline"><span class="n">03</span><span class="t">Pipeline</span><span class="m">six stages</span></a>
+  <a class="stage-chip" href="#star"><span class="n">04</span><span class="t">Star schema</span><span class="m">HLP + DIM + FCT</span></a>
+  <a class="stage-chip" href="#control"><span class="n">05</span><span class="t">Control plane</span><span class="m">pipeline_configs</span></a>
+  <a class="stage-chip" href="#stack"><span class="n">06</span><span class="t">Stack</span><span class="m">what actually runs</span></a>
+  <a class="stage-chip" href="#decisions"><span class="n">07</span><span class="t">Decisions</span><span class="m">why this shape</span></a>
+</nav>
+
+<!-- 01 PROBLEM -->
+<section id="problem">
+  <div class="sec-head">
+    <span class="num">01</span>
+    <h2>The problem</h2>
+  </div>
+  <div class="col">
+    <p>
+      The course asks for a full data-driven architecture: ingestion, processing,
+      a warehouse, a dashboard, a shareable data product, and logging. The domain
+      is a two-sided store. Customers browse and order. Merchants manage catalog
+      and stock. That operational system is real — FastAPI, React, MySQL — and it
+      is also the source of truth for everything downstream.
+    </p>
+    <p>
+      Analytics cannot live in that MySQL. The OLTP schema is 3NF
+      (<code>customers</code>, <code>merchants</code>, <code>products</code>,
+      <code>orders</code>, <code>order_items</code>). It mutates. It has no
+      surrogate keys, no grain contract, and no place to hang a five-day forecast.
+      The lakehouse exists to freeze those mutations into layers that can be
+      replayed, modelled, and served.
+    </p>
+  </div>
+  <div class="grid-3" style="margin-top:1.4rem">
+    <div class="card">
+      <span class="label">Operational</span>
+      <h3>Simple Store</h3>
+      <p>React + Vite frontend, FastAPI backend, SQLAlchemy against the shared <code>inventory</code> database. Customer and merchant modes, cart, stock, live <code>/api/analytics/*</code> from OLTP.</p>
+    </div>
+    <div class="card">
+      <span class="label">Ingest</span>
+      <h3>Two ways out of MySQL</h3>
+      <p>Debezium CDC into Kafka for change events. Airflow + Trino incremental <code>MERGE</code> for the lakehouse. They share the database; they do not share a consumer.</p>
+    </div>
+    <div class="card">
+      <span class="label">Serve</span>
+      <h3>Gold in two stores</h3>
+      <p>Delta Lake on MinIO holds the Kimball tables. ClickHouse <code>ReplacingMergeTree</code> holds the same gold plus semantic marts, quality audits, and forecasts.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 02 ARCHITECTURE -->
+<section id="architecture">
+  <div class="sec-head">
+    <span class="num">02</span>
+    <h2>Architecture</h2>
+  </div>
+  <div class="col">
+    <p>
+      Five Docker Compose projects sit next to each other:
+      <code>dummyData</code>, <code>simpleStoreSetup</code>,
+      <code>kafkaSetup</code>, <code>pipelineSetup</code>,
+      <code>trinoSetup</code>. They talk over host ports and a couple of
+      named networks. The compute that actually moves rows into the lake is
+      Trino SQL, scheduled by Airflow, not Spark.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 1120 520" role="img" aria-label="System architecture from Simple Store through MySQL, CDC, Trino, Delta Lake, ClickHouse, and Superset">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+        </marker>
+        <marker id="arr-pine" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--pine)"/>
+        </marker>
+        <marker id="arr-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--amber)"/>
+        </marker>
+      </defs>
+
+      <!-- OLTP -->
+      <rect x="16" y="150" width="168" height="168" rx="8" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+      <text x="100" y="178" text-anchor="middle" class="l" fill="var(--pine)">Data product</text>
+      <text x="100" y="206" text-anchor="middle" class="m" fill="var(--ink)">React + Vite</text>
+      <text x="100" y="224" text-anchor="middle" class="s" fill="var(--ink-3)">localhost:3000</text>
+      <text x="100" y="250" text-anchor="middle" class="m" fill="var(--ink)">FastAPI</text>
+      <text x="100" y="268" text-anchor="middle" class="s" fill="var(--ink-3)">SQLAlchemy / PyMySQL</text>
+      <text x="100" y="294" text-anchor="middle" class="s" fill="var(--pine)">simpleStoreSetup</text>
+
+      <line x1="184" y1="234" x2="230" y2="234" stroke="var(--pine)" stroke-width="1.8" marker-end="url(#arr-pine)"/>
+
+      <!-- MySQL -->
+      <rect x="232" y="168" width="168" height="132" rx="8" fill="var(--surface-2)" stroke="var(--rule-strong)" stroke-width="1.6"/>
+      <text x="316" y="196" text-anchor="middle" class="l" fill="var(--ink)">MySQL 8.0</text>
+      <text x="316" y="218" text-anchor="middle" class="s" fill="var(--ink-2)">inventory</text>
+      <text x="316" y="236" text-anchor="middle" class="s" fill="var(--ink-2)">pipeline_configs</text>
+      <text x="316" y="262" text-anchor="middle" class="s" fill="var(--ink-3)">binlog ROW + GTID</text>
+      <text x="316" y="282" text-anchor="middle" class="s" fill="var(--ink-3)">kafkaSetup</text>
+
+      <!-- dummy data -->
+      <rect x="248" y="46" width="136" height="72" rx="7" fill="var(--surface)" stroke="var(--rule)"/>
+      <text x="316" y="74" text-anchor="middle" class="l" fill="var(--ink-3)">dummyData</text>
+      <text x="316" y="96" text-anchor="middle" class="s" fill="var(--ink-3)">100 / 25 / 250 / 400</text>
+      <line x1="316" y1="118" x2="316" y2="166" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr)"/>
+
+      <!-- CDC path -->
+      <rect x="460" y="36" width="300" height="150" rx="8" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="1.6"/>
+      <text x="610" y="58" text-anchor="middle" class="l" fill="var(--amber)">CDC path — events, not the lake</text>
+      <rect x="478" y="74" width="84" height="88" rx="6" fill="var(--surface)" stroke="var(--amber)"/>
+      <text x="520" y="108" text-anchor="middle" class="m" fill="var(--ink)">Debezium</text>
+      <text x="520" y="126" text-anchor="middle" class="s" fill="var(--ink-3)">Connect :8083</text>
+      <text x="520" y="144" text-anchor="middle" class="s" fill="var(--ink-3)">unwrap SMT</text>
+      <rect x="578" y="74" width="84" height="88" rx="6" fill="var(--surface)" stroke="var(--amber)"/>
+      <text x="620" y="108" text-anchor="middle" class="m" fill="var(--ink)">Kafka</text>
+      <text x="620" y="126" text-anchor="middle" class="s" fill="var(--ink-3)">Zookeeper</text>
+      <text x="620" y="144" text-anchor="middle" class="s" fill="var(--ink-3)">dbserver1.*</text>
+      <rect x="658" y="74" width="84" height="88" rx="6" fill="var(--surface)" stroke="var(--amber)"/>
+      <text x="700" y="108" text-anchor="middle" class="m" fill="var(--ink)">Conduktor</text>
+      <text x="700" y="126" text-anchor="middle" class="s" fill="var(--ink-3)">topic UI</text>
+      <text x="700" y="144" text-anchor="middle" class="s" fill="var(--ink-3)">:8087</text>
+      <line x1="316" y1="168" x2="316" y2="132" stroke="transparent"/>
+      <path d="M400 200 C430 200, 430 110, 460 110" fill="none" stroke="var(--amber)" stroke-width="1.6" marker-end="url(#arr-amber)"/>
+
+      <!-- Lake path -->
+      <rect x="460" y="214" width="300" height="248" rx="8" fill="var(--cool-soft)" stroke="var(--cool)" stroke-width="1.6"/>
+      <text x="610" y="238" text-anchor="middle" class="l" fill="var(--cool)">Lake path — this is the medallion</text>
+      <rect x="478" y="256" width="264" height="56" rx="6" fill="var(--surface)" stroke="var(--cool)"/>
+      <text x="610" y="278" text-anchor="middle" class="m" fill="var(--ink)">Apache Airflow 2.8.1</text>
+      <text x="610" y="296" text-anchor="middle" class="s" fill="var(--ink-3)">LocalExecutor · :8081 · Datasets</text>
+      <rect x="478" y="326" width="264" height="56" rx="6" fill="var(--surface)" stroke="var(--cool)"/>
+      <text x="610" y="348" text-anchor="middle" class="m" fill="var(--ink)">Trino</text>
+      <text x="610" y="366" text-anchor="middle" class="s" fill="var(--ink-3)">catalogs: mysql · delta_lake · clickhouse</text>
+      <rect x="478" y="396" width="126" height="50" rx="6" fill="var(--surface)" stroke="var(--cool)"/>
+      <text x="541" y="418" text-anchor="middle" class="m" fill="var(--ink)">Hive Metastore</text>
+      <text x="541" y="434" text-anchor="middle" class="s" fill="var(--ink-3)">:9083</text>
+      <rect x="616" y="396" width="126" height="50" rx="6" fill="var(--surface)" stroke="var(--cool)"/>
+      <text x="679" y="418" text-anchor="middle" class="m" fill="var(--ink)">MinIO</text>
+      <text x="679" y="434" text-anchor="middle" class="s" fill="var(--ink-3)">s3a://bronze|silver|gold</text>
+      <line x1="400" y1="234" x2="458" y2="234" stroke="var(--cool)" stroke-width="1.6" marker-end="url(#arr)"/>
+      <text x="428" y="226" text-anchor="middle" class="s" fill="var(--cool)">JDBC</text>
+
+      <!-- Gold serve -->
+      <rect x="820" y="214" width="280" height="248" rx="8" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+      <text x="960" y="238" text-anchor="middle" class="l" fill="var(--pine)">Gold + serving</text>
+      <rect x="838" y="256" width="244" height="52" rx="6" fill="var(--surface)" stroke="var(--pine)"/>
+      <text x="960" y="278" text-anchor="middle" class="m" fill="var(--ink)">Delta Lake gold</text>
+      <text x="960" y="294" text-anchor="middle" class="s" fill="var(--ink-3)">HLP · DIM · FCT on MinIO</text>
+      <rect x="838" y="322" width="244" height="52" rx="6" fill="var(--surface)" stroke="var(--pine)"/>
+      <text x="960" y="344" text-anchor="middle" class="m" fill="var(--ink)">ClickHouse 23.8</text>
+      <text x="960" y="360" text-anchor="middle" class="s" fill="var(--ink-3)">s3() Parquet load · marts · forecast</text>
+      <rect x="838" y="388" width="244" height="52" rx="6" fill="var(--surface)" stroke="var(--pine)"/>
+      <text x="960" y="410" text-anchor="middle" class="m" fill="var(--ink)">Apache Superset</text>
+      <text x="960" y="426" text-anchor="middle" class="s" fill="var(--ink-3)">:8088 · BI on gold</text>
+      <line x1="760" y1="338" x2="818" y2="338" stroke="var(--pine)" stroke-width="1.8" marker-end="url(#arr-pine)"/>
+
+      <!-- Timeplus note -->
+      <rect x="820" y="36" width="280" height="70" rx="7" fill="var(--surface)" stroke="var(--rule)" stroke-dasharray="4 3"/>
+      <text x="960" y="64" text-anchor="middle" class="m" fill="var(--ink-3)">Timeplus (deployed)</text>
+      <text x="960" y="84" text-anchor="middle" class="s" fill="var(--ink-3)">in pipelineSetup compose · no DAG writes gold from it</text>
+      <path d="M760 110 C790 110, 790 70, 818 70" fill="none" stroke="var(--rule)" stroke-width="1.2" stroke-dasharray="4 3"/>
+    </svg>
+    <figcaption>
+      <b>Two exits from the same MySQL, different jobs.</b>
+      CDC is for watching change events (insert / update / delete) in Kafka.
+      The medallion is a scheduled, watermarked extract through Trino so
+      <code>MERGE</code> is deterministic and schema is driven by
+      <code>pipeline_configs</code>. Timeplus is in the compose file and on
+      the original architecture sketch; the implemented gold load is ClickHouse
+      reading Parquet from MinIO.
+    </figcaption>
+  </figure>
+
+  <div class="note">
+    <p class="hd">What the code does vs what a README can claim</p>
+    <p>
+      Folder READMEs mention Spark, Kafka-to-bronze streaming, and PostgreSQL
+      as the home of facts and dimensions. The DAGs do not. Bronze and silver
+      are Trino SQL against <code>mysql.inventory.*</code> and
+      <code>delta_lake.bronze|silver.*</code>. Gold facts and dims are written
+      to Delta Lake, then copied into ClickHouse. PostgreSQL in this repo
+      backs Airflow, Superset, Conduktor, and the Hive metastore — not the star schema.
+    </p>
+  </div>
+</section>
+
+<!-- 03 PIPELINE -->
+<section id="pipeline">
+  <div class="sec-head">
+    <span class="num">03</span>
+    <h2>The staged pipeline</h2>
+  </div>
+  <div class="col">
+    <p>
+      Five entities travel together. Each has a bronze DAG and a silver DAG.
+      Gold is five transformer DAGs whose task lists live in MySQL, not in Python.
+      Semantic marts, a forecast, and quality checks hang off Airflow Datasets
+      so the graph is data, not cron luck.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 1120 340" role="img" aria-label="Medallion flow from five MySQL tables through bronze, silver, gold, semantic, forecast, and quality">
+      <defs>
+        <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+        </marker>
+      </defs>
+      <text x="70" y="28" text-anchor="middle" class="l" fill="var(--ink-3)">Source</text>
+      <text x="250" y="28" text-anchor="middle" class="l" fill="var(--ink-3)">Bronze</text>
+      <text x="460" y="28" text-anchor="middle" class="l" fill="var(--ink-3)">Silver</text>
+      <text x="690" y="28" text-anchor="middle" class="l" fill="var(--ink-3)">Gold</text>
+      <text x="960" y="28" text-anchor="middle" class="l" fill="var(--ink-3)">Serve</text>
+
+      <rect x="16" y="48" width="108" height="268" rx="7" fill="var(--surface-2)" stroke="var(--rule-strong)"/>
+      <text x="70" y="78" text-anchor="middle" class="s" fill="var(--ink)">customers</text>
+      <text x="70" y="124" text-anchor="middle" class="s" fill="var(--ink)">merchants</text>
+      <text x="70" y="170" text-anchor="middle" class="s" fill="var(--ink)">products</text>
+      <text x="70" y="216" text-anchor="middle" class="s" fill="var(--ink)">orders</text>
+      <text x="70" y="262" text-anchor="middle" class="s" fill="var(--ink)">order_items</text>
+      <text x="70" y="296" text-anchor="middle" class="s" fill="var(--ink-3)">MySQL inventory</text>
+
+      <line x1="124" y1="182" x2="168" y2="182" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#a2)"/>
+
+      <rect x="170" y="48" width="160" height="268" rx="7" fill="var(--cool-soft)" stroke="var(--cool)" stroke-width="1.6"/>
+      <text x="250" y="78" text-anchor="middle" class="m" fill="var(--cool)">staging + MERGE</text>
+      <text x="250" y="110" text-anchor="middle" class="s" fill="var(--ink-2)">delta_lake.bronze.*</text>
+      <text x="250" y="136" text-anchor="middle" class="s" fill="var(--ink-2)">s3a://bronze/&lt;table&gt;/</text>
+      <text x="250" y="170" text-anchor="middle" class="s" fill="var(--ink-2)">watermark on updated_at</text>
+      <text x="250" y="196" text-anchor="middle" class="s" fill="var(--ink-2)">_additional_attributes</text>
+      <text x="250" y="230" text-anchor="middle" class="s" fill="var(--cool)">schema-driven SQL</text>
+      <text x="250" y="256" text-anchor="middle" class="s" fill="var(--ink-3)">sql_builder.py</text>
+      <text x="250" y="288" text-anchor="middle" class="s" fill="var(--ink-3)">ingestion_runs</text>
+
+      <line x1="330" y1="182" x2="374" y2="182" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#a2)"/>
+
+      <rect x="376" y="48" width="168" height="268" rx="7" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="1.6"/>
+      <text x="460" y="78" text-anchor="middle" class="m" fill="var(--amber)">flatten + MERGE</text>
+      <text x="460" y="110" text-anchor="middle" class="s" fill="var(--ink-2)">*_silver</text>
+      <text x="460" y="136" text-anchor="middle" class="s" fill="var(--ink-2)">JSON keys → columns</text>
+      <text x="460" y="162" text-anchor="middle" class="s" fill="var(--ink-2)">ALTER if new keys</text>
+      <text x="460" y="196" text-anchor="middle" class="s" fill="var(--ink-2)">s3a://silver/&lt;table&gt;/</text>
+      <text x="460" y="230" text-anchor="middle" class="s" fill="var(--amber)">typed, current row</text>
+      <text x="460" y="268" text-anchor="middle" class="s" fill="var(--ink-3)">dataset: silver_*.txt</text>
+
+      <line x1="544" y1="182" x2="588" y2="182" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#a2)"/>
+
+      <rect x="590" y="48" width="200" height="268" rx="7" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+      <text x="690" y="78" text-anchor="middle" class="m" fill="var(--pine)">Kimball</text>
+      <text x="690" y="110" text-anchor="middle" class="s" fill="var(--ink-2)">customer / merchant / product</text>
+      <text x="690" y="126" text-anchor="middle" class="s" fill="var(--ink-2)">HLP then DIM</text>
+      <text x="690" y="154" text-anchor="middle" class="s" fill="var(--ink-2)">fct_orders</text>
+      <text x="690" y="170" text-anchor="middle" class="s" fill="var(--ink-2)">fct_order_items</text>
+      <text x="690" y="196" text-anchor="middle" class="s" fill="var(--ink-2)">dim_date</text>
+      <text x="690" y="228" text-anchor="middle" class="s" fill="var(--pine)">then s3() → ClickHouse</text>
+      <text x="690" y="256" text-anchor="middle" class="s" fill="var(--ink-3)">ReplacingMergeTree</text>
+      <text x="690" y="288" text-anchor="middle" class="s" fill="var(--ink-3)">gold.*</text>
+
+      <line x1="790" y1="182" x2="834" y2="182" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#a2)"/>
+
+      <rect x="836" y="48" width="268" height="268" rx="7" fill="var(--surface)" stroke="var(--rule-strong)"/>
+      <text x="970" y="78" text-anchor="middle" class="m" fill="var(--ink)">Semantic + ML + QA</text>
+      <text x="970" y="112" text-anchor="middle" class="s" fill="var(--ink-2)">6 merchant marts</text>
+      <text x="970" y="130" text-anchor="middle" class="s" fill="var(--ink-2)">3 customer marts</text>
+      <text x="970" y="162" text-anchor="middle" class="s" fill="var(--ink-2)">LinearRegression 5-day forecast</text>
+      <text x="970" y="180" text-anchor="middle" class="s" fill="var(--ink-2)">product_sales_forecast_5d</text>
+      <text x="970" y="212" text-anchor="middle" class="s" fill="var(--ink-2)">quality_test.column_null_audit</text>
+      <text x="970" y="230" text-anchor="middle" class="s" fill="var(--ink-2)">table_business_metrics</text>
+      <text x="970" y="262" text-anchor="middle" class="s" fill="var(--ink-3)">Superset on ClickHouse / Trino</text>
+      <text x="970" y="288" text-anchor="middle" class="s" fill="var(--ink-3)">store UI still queries MySQL</text>
+    </svg>
+    <figcaption>
+      <b>Same five tables all the way through.</b>
+      Bronze keeps a current-row copy plus a JSON overflow column.
+      Silver promotes overflow keys to real columns.
+      Gold assigns surrogate keys and builds facts.
+      ClickHouse is the serving copy, not a third modelling style.
+    </figcaption>
+  </figure>
+
+  <div class="pipeline">
+
+    <article class="stage pine">
+      <div class="stage-n">01</div>
+      <div class="stage-body">
+        <div class="stage-title">
+          <h3>Seed and operate</h3>
+          <span class="chip pine">dummyData · simpleStore</span>
+        </div>
+        <p>
+          <code>generate_dummy_data.py</code> inserts a default of
+          <strong>100 customers, 25 merchants, 250 products, 400 orders</strong>
+          (1–5 items each) into <code>inventory</code>. A CSV twin writes the
+          same shapes to <code>dummyData/csv_output/</code>.
+          <code>mysql-init.sql</code> also plants a tiny demo catalog so the
+          app works before the generator runs.
+        </p>
+        <p>
+          Simple Store is the data product: customer signup, cart, checkout,
+          merchant CRUD, order status, and dashboard stats. Writes go to the
+          kafkaSetup MySQL on the external network <code>kafkasetup_default</code>.
+          <code>updated_at</code> columns are what the lake uses as a CDC watermark —
+          even though that load is JDBC, not Kafka.
+        </p>
+      </div>
+    </article>
+
+    <article class="stage amber">
+      <div class="stage-n">02</div>
+      <div class="stage-body">
+        <div class="stage-title">
+          <h3>Capture change events</h3>
+          <span class="chip amber">Debezium · Kafka</span>
+        </div>
+        <p>
+          MySQL is configured for CDC in <code>mysql.cnf</code>:
+          <code>binlog_format=ROW</code>, <code>binlog_row_image=FULL</code>,
+          GTID on. A dedicated replication user is created at init.
+          The connector <code>mysql-connector</code> uses
+          <code>ExtractNewRecordState</code>, JSON without schemas, and
+          <code>snapshot.mode=initial</code>.
+        </p>
+        <p>
+          Topics are <code>dbserver1.inventory.{customers,orders,products,order_items}</code>.
+          <strong>Merchants are not in <code>table.include.list</code></strong> —
+          merchant rows still reach the lake through Trino, they just do not
+          appear as Kafka events unless the include list is extended.
+          Conduktor is the inspection UI. Airflow never consumes these topics.
+        </p>
+      </div>
+    </article>
+
+    <article class="stage cool">
+      <div class="stage-n">03</div>
+      <div class="stage-body">
+        <div class="stage-title">
+          <h3>Bronze — incremental MERGE</h3>
+          <span class="chip cool">5 ingest DAGs</span>
+        </div>
+        <p>
+          Each bronze DAG is the same shape:
+          <code>start_task → read_job_config → ensure_tables_exist → load_to_staging → merge_to_main → update_watermark → end_task</code>.
+          Config comes from <code>pipeline_jobs</code> (is_cdc, watermark, batch size).
+          Column types come from <code>table_columns.column_map</code>.
+          Table DDL comes from <code>table_ddl</code>. SQL is generated by
+          <code>utils/sql_builder.py</code> — no column names are hardcoded in the DAG files.
+        </p>
+        <p>
+          Load is <code>INSERT INTO delta_lake.bronze.&lt;table&gt;_staging SELECT … FROM mysql.inventory.&lt;table&gt;</code>
+          with <code>WHERE updated_at &gt; last_cdc_value</code> after the first run.
+          Then a Trino <code>MERGE</code> on the natural key
+          (<code>order_id</code>, <code>product_id</code>, <code>id</code>,
+          <code>merchant_id</code>, <code>item_id</code>).
+          Unregistered MySQL columns are packed into
+          <code>_additional_attributes</code> as a JSON string so a new source
+          column cannot break the job.
+        </p>
+        <pre><code>mysql_customers_to_delta_lake     ingest_customers      hourly :05
+mysql_merchants_to_delta_lake     ingest_merchants      hourly :10
+mysql_products_to_delta_lake      ingest_products       hourly :00
+mysql_orders_to_delta_lake        ingest_orders         hourly :00
+mysql_order_items_to_delta_lake   ingest_order_items    hourly :20</code></pre>
+      </div>
+    </article>
+
+    <article class="stage cool">
+      <div class="stage-n">04</div>
+      <div class="stage-body">
+        <div class="stage-title">
+          <h3>Silver — flatten overflow, keep types</h3>
+          <span class="chip cool">5 transform DAGs</span>
+        </div>
+        <p>
+          Silver DAGs wait on the bronze Dataset
+          (<code>/opt/airflow/datasets/bronze_*.txt</code>).
+          They discover JSON keys in <code>_additional_attributes</code>,
+          <code>ALTER TABLE</code> the silver Delta table if a key is new,
+          extract with <code>JSON_EXTRACT_SCALAR</code>, and <code>MERGE</code>
+          into <code>delta_lake.silver.&lt;table&gt;_silver</code>.
+          Registered columns keep their mapped types. Promoted extras land as <code>VARCHAR</code>.
+        </p>
+        <p>
+          That is the schema-evolution contract: bronze never fails on unknown
+          columns; silver eventually makes them queryable; gold SQL still only
+          projects the modelled attributes.
+        </p>
+      </div>
+    </article>
+
+    <article class="stage pine">
+      <div class="stage-n">05</div>
+      <div class="stage-body">
+        <div class="stage-title">
+          <h3>Gold — helpers, dimensions, facts</h3>
+          <span class="chip pine">5 transformer DAGs</span>
+        </div>
+        <p>
+          Each gold DAG file hardcodes only a <code>DAG_ID</code> matching
+          <code>pipeline_jobs.job_id</code>. Tasks are rows in
+          <code>pipeline_tasks</code>, ordered by <code>sequence</code>.
+          SQL files live under <code>airflow/jobs/</code>.
+          Python follow-on tasks load the resulting Parquet from MinIO into
+          ClickHouse via the HTTP <code>s3()</code> table function
+          (<code>run_pipeline_task_sql.py</code>).
+        </p>
+        <p>
+          Dimensions are Type 1: HLP inserts a new surrogate for a new natural
+          key; DIM <code>MERGE</code>s attributes and sets <code>oper = 'U'</code>
+          on match. Facts are insert-only for unseen natural keys, with
+          <code>SUM(1) OVER (ROWS UNBOUNDED PRECEDING)</code> against
+          <code>MAX(sk)</code> to mint surrogates. Line total is
+          <code>quantity * price</code>. Date keys are
+          <code>CAST(DATE_FORMAT(order_date, '%Y%m%d') AS BIGINT)</code>.
+        </p>
+      </div>
+    </article>
+
+    <article class="stage amber">
+      <div class="stage-n">06</div>
+      <div class="stage-body">
+        <div class="stage-title">
+          <h3>Semantic, forecast, quality</h3>
+          <span class="chip amber">ClickHouse</span>
+        </div>
+        <p>
+          Merchant marts: revenue overview, revenue by month, AOV by quarter,
+          product performance, stock vs sales, customer reach.
+          Customer marts: favourite merchant, lifetime value, order-frequency buckets.
+          All are <code>INSERT INTO gold.* SELECT … FINAL JOIN</code> against
+          ClickHouse gold copies.
+        </p>
+        <p>
+          <code>orders_forecast_dag</code> fits scikit-learn
+          <code>LinearRegression</code> per <code>(merchant_sk, product_sk)</code>
+          on 90 days of <code>fct_order_items</code> quantity, writes five future
+          days to <code>product_sales_forecast_5d</code>, then denormalises names
+          into <code>product_sales_forecast_5d_norm</code>.
+          Short series fall back to the historical mean.
+          Quality then records null percentages and business metrics
+          (total sales, order count, AOV, units sold, inventory units)
+          into <code>quality_test</code>.
+        </p>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<!-- 04 STAR -->
+<section id="star">
+  <div class="sec-head">
+    <span class="num">04</span>
+    <h2>Star schema</h2>
+  </div>
+  <div class="col">
+    <p>
+      The model is Kimball with an explicit helper table in front of every
+      dimension. The HLP is the only place a natural key becomes a surrogate.
+      Facts never join silver on <code>customer_id</code>; they join HLP.
+      That keeps Type 1 rewrites on the DIM from scrambling fact keys.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 1120 420" role="img" aria-label="Kimball star with helper tables, two facts, and a date dimension">
+      <rect x="40" y="28" width="200" height="110" rx="8" fill="var(--cool-soft)" stroke="var(--cool)" stroke-width="1.6"/>
+      <text x="140" y="56" text-anchor="middle" class="l" fill="var(--cool)">customer_hlp</text>
+      <text x="140" y="80" text-anchor="middle" class="s" fill="var(--ink-2)">customer_sk · customer_id</text>
+      <text x="140" y="98" text-anchor="middle" class="s" fill="var(--ink-3)">source · oper · batch_id</text>
+      <text x="140" y="122" text-anchor="middle" class="s" fill="var(--cool)">insert new NK only</text>
+
+      <rect x="40" y="168" width="200" height="110" rx="8" fill="var(--surface)" stroke="var(--rule-strong)"/>
+      <text x="140" y="196" text-anchor="middle" class="l" fill="var(--ink)">customer_dim</text>
+      <text x="140" y="220" text-anchor="middle" class="s" fill="var(--ink-2)">name · email · cnic</text>
+      <text x="140" y="238" text-anchor="middle" class="s" fill="var(--ink-3)">created_at · updated_at</text>
+      <text x="140" y="260" text-anchor="middle" class="s" fill="var(--ink-3)">Type 1 MERGE</text>
+
+      <rect x="280" y="28" width="200" height="110" rx="8" fill="var(--cool-soft)" stroke="var(--cool)" stroke-width="1.6"/>
+      <text x="380" y="56" text-anchor="middle" class="l" fill="var(--cool)">merchant_hlp</text>
+      <text x="380" y="80" text-anchor="middle" class="s" fill="var(--ink-2)">merchant_sk · merchant_id</text>
+      <text x="380" y="98" text-anchor="middle" class="s" fill="var(--ink-3)">source · oper · batch_id</text>
+      <text x="380" y="122" text-anchor="middle" class="s" fill="var(--cool)">insert new NK only</text>
+
+      <rect x="280" y="168" width="200" height="110" rx="8" fill="var(--surface)" stroke="var(--rule-strong)"/>
+      <text x="380" y="196" text-anchor="middle" class="l" fill="var(--ink)">merchant_dim</text>
+      <text x="380" y="220" text-anchor="middle" class="s" fill="var(--ink-2)">store_name · email</text>
+      <text x="380" y="238" text-anchor="middle" class="s" fill="var(--ink-3)">password never copied here</text>
+      <text x="380" y="260" text-anchor="middle" class="s" fill="var(--ink-3)">Type 1 MERGE</text>
+
+      <rect x="40" y="308" width="200" height="90" rx="8" fill="var(--cool-soft)" stroke="var(--cool)" stroke-width="1.6"/>
+      <text x="140" y="336" text-anchor="middle" class="l" fill="var(--cool)">product_hlp</text>
+      <text x="140" y="360" text-anchor="middle" class="s" fill="var(--ink-2)">product_sk · product_id</text>
+      <text x="140" y="380" text-anchor="middle" class="s" fill="var(--cool)">insert new NK only</text>
+
+      <rect x="280" y="308" width="200" height="90" rx="8" fill="var(--surface)" stroke="var(--rule-strong)"/>
+      <text x="380" y="336" text-anchor="middle" class="l" fill="var(--ink)">product_dim</text>
+      <text x="380" y="360" text-anchor="middle" class="s" fill="var(--ink-2)">merchant_sk · name · price</text>
+      <text x="380" y="380" text-anchor="middle" class="s" fill="var(--ink-3)">stock_quantity</text>
+
+      <rect x="560" y="70" width="240" height="140" rx="8" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+      <text x="680" y="100" text-anchor="middle" class="l" fill="var(--pine)">fct_orders</text>
+      <text x="680" y="124" text-anchor="middle" class="s" fill="var(--ink-2)">order_sk · order_id</text>
+      <text x="680" y="142" text-anchor="middle" class="s" fill="var(--ink-2)">customer_sk · order_status</text>
+      <text x="680" y="160" text-anchor="middle" class="s" fill="var(--ink-2)">placed_date_sk · total_amount</text>
+      <text x="680" y="178" text-anchor="middle" class="s" fill="var(--ink-2)">item_count</text>
+      <text x="680" y="196" text-anchor="middle" class="s" fill="var(--pine)">grain: one order</text>
+
+      <rect x="560" y="240" width="240" height="158" rx="8" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+      <text x="680" y="270" text-anchor="middle" class="l" fill="var(--pine)">fct_order_items</text>
+      <text x="680" y="294" text-anchor="middle" class="s" fill="var(--ink-2)">order_item_sk · item_id · order_id</text>
+      <text x="680" y="312" text-anchor="middle" class="s" fill="var(--ink-2)">customer_sk · merchant_sk · product_sk</text>
+      <text x="680" y="330" text-anchor="middle" class="s" fill="var(--ink-2)">order_date_sk</text>
+      <text x="680" y="348" text-anchor="middle" class="s" fill="var(--ink-2)">qty · unit_price · line_total</text>
+      <text x="680" y="372" text-anchor="middle" class="s" fill="var(--pine)">grain: one line</text>
+
+      <rect x="860" y="140" width="220" height="140" rx="8" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="1.6"/>
+      <text x="970" y="172" text-anchor="middle" class="l" fill="var(--amber)">dim_date</text>
+      <text x="970" y="196" text-anchor="middle" class="s" fill="var(--ink-2)">date_sk = yyyymmdd</text>
+      <text x="970" y="214" text-anchor="middle" class="s" fill="var(--ink-2)">dow · month · quarter · year</text>
+      <text x="970" y="232" text-anchor="middle" class="s" fill="var(--ink-2)">is_weekend · is_weekday</text>
+      <text x="970" y="256" text-anchor="middle" class="s" fill="var(--amber)">role-playing on orders</text>
+
+      <line x1="240" y1="83" x2="560" y2="120" stroke="var(--ink-3)" stroke-width="1.2"/>
+      <line x1="240" y1="223" x2="560" y2="140" stroke="var(--ink-3)" stroke-width="1.2"/>
+      <line x1="480" y1="83" x2="560" y2="300" stroke="var(--ink-3)" stroke-width="1.2"/>
+      <line x1="240" y1="353" x2="560" y2="320" stroke="var(--ink-3)" stroke-width="1.2"/>
+      <line x1="480" y1="353" x2="560" y2="330" stroke="var(--ink-3)" stroke-width="1.2"/>
+      <line x1="800" y1="140" x2="858" y2="190" stroke="var(--ink-3)" stroke-width="1.2"/>
+      <line x1="800" y1="300" x2="858" y2="230" stroke="var(--ink-3)" stroke-width="1.2"/>
+    </svg>
+    <figcaption>
+      <b>Two fact grains on purpose.</b>
+      <code>fct_orders</code> answers “how many orders, in what status, of what value.”
+      <code>fct_order_items</code> answers “which merchant and product earned the revenue.”
+      Merchant is not on the order header in OLTP — it arrives on the line through product.
+      Gold DDL lives in <code>trino_kimbell_modelling_DDLS.sql</code>; ClickHouse mirrors it in <code>clickhouse-init.sql</code>.
+    </figcaption>
+  </figure>
+
+  <div class="t-wrap" style="margin-top:8px">
+    <table>
+      <thead>
+        <tr><th>Gold object</th><th>Built by</th><th>SQL / task</th><th>Then copied to ClickHouse as</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>customer_hlp / customer_dim</td><td class="mono">gold_customer (job 12)</td><td>customer_hlp.sql → customer_dim.sql → *_semantic.py</td><td class="mono">gold.customer_*</td></tr>
+        <tr><td>merchant_hlp / merchant_dim</td><td class="mono">gold_merchant (job 13)</td><td>merchant_hlp.sql → merchant_dim.sql → *_semantic.py</td><td class="mono">gold.merchant_*</td></tr>
+        <tr><td>product_hlp / product_dim</td><td class="mono">gold_product (job 16)</td><td>waits on merchant transformer</td><td class="mono">gold.product_*</td></tr>
+        <tr><td>fct_orders</td><td class="mono">gold_order (job 15)</td><td>waits on customer, merchant, product</td><td class="mono">gold.fct_orders</td></tr>
+        <tr><td>fct_order_items</td><td class="mono">gold_order_items (job 14)</td><td>same dimension wait; joins product_dim for merchant_sk</td><td class="mono">gold.fct_order_items</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 05 CONTROL -->
+<section id="control">
+  <div class="sec-head">
+    <span class="num">05</span>
+    <h2>The control plane</h2>
+  </div>
+  <div class="col">
+    <p>
+      Airflow is not the source of truth for “what runs when.”
+      MySQL database <code>pipeline_configs</code> is. DAGs parse it at load
+      time, resolve an Airflow Dataset name and a dependency list, and either
+      schedule on cron or on those datasets. Adding a gold task is an
+      <code>INSERT</code> into <code>pipeline_tasks</code>, not a new Python file
+      — unless you need a new entity, in which case you copy the transformer
+      template and change <code>DAG_ID</code>.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 1120 300" role="img" aria-label="Airflow Dataset dependency graph from bronze ingest through quality checks">
+      <text x="16" y="22" class="l" fill="var(--ink-3)">Dataset graph (from pipeline_configs.dataset)</text>
+
+      <rect x="16" y="46" width="130" height="44" rx="6" fill="var(--cool-soft)" stroke="var(--cool)"/>
+      <text x="81" y="73" text-anchor="middle" class="s" fill="var(--ink)">bronze_*</text>
+      <rect x="166" y="46" width="130" height="44" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+      <text x="231" y="73" text-anchor="middle" class="s" fill="var(--ink)">silver_*</text>
+      <line x1="146" y1="68" x2="164" y2="68" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#a2)"/>
+
+      <text x="16" y="118" class="s" fill="var(--ink-3)">each entity: ingest (cron) emits bronze dataset → silver DAG listens</text>
+
+      <rect x="16" y="150" width="150" height="50" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+      <text x="91" y="172" text-anchor="middle" class="s" fill="var(--ink)">customer_transformer</text>
+      <text x="91" y="188" text-anchor="middle" class="s" fill="var(--ink-3)">no upstream dataset</text>
+
+      <rect x="186" y="150" width="150" height="50" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+      <text x="261" y="172" text-anchor="middle" class="s" fill="var(--ink)">merchant_transformer</text>
+      <text x="261" y="188" text-anchor="middle" class="s" fill="var(--ink-3)">no upstream dataset</text>
+
+      <rect x="356" y="150" width="150" height="50" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+      <text x="431" y="172" text-anchor="middle" class="s" fill="var(--ink)">product_transformer</text>
+      <text x="431" y="188" text-anchor="middle" class="s" fill="var(--ink-3)">← merchant</text>
+
+      <rect x="526" y="122" width="150" height="50" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+      <text x="601" y="144" text-anchor="middle" class="s" fill="var(--ink)">order_transformer</text>
+      <text x="601" y="160" text-anchor="middle" class="s" fill="var(--ink-3)">← cust, merch, prod</text>
+
+      <rect x="526" y="186" width="150" height="50" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+      <text x="601" y="208" text-anchor="middle" class="s" fill="var(--ink)">order_items_transformer</text>
+      <text x="601" y="224" text-anchor="middle" class="s" fill="var(--ink-3)">← cust, merch, prod</text>
+
+      <rect x="706" y="122" width="150" height="50" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+      <text x="781" y="144" text-anchor="middle" class="s" fill="var(--ink)">customer_semantic</text>
+      <text x="781" y="160" text-anchor="middle" class="s" fill="var(--ink-3)">← both facts</text>
+
+      <rect x="706" y="186" width="150" height="50" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+      <text x="781" y="208" text-anchor="middle" class="s" fill="var(--ink)">merchant_semantic</text>
+      <text x="781" y="224" text-anchor="middle" class="s" fill="var(--ink-3)">← both facts</text>
+
+      <rect x="886" y="150" width="150" height="50" rx="6" fill="var(--surface-2)" stroke="var(--rule-strong)"/>
+      <text x="961" y="172" text-anchor="middle" class="s" fill="var(--ink)">orders_forecast</text>
+      <text x="961" y="188" text-anchor="middle" class="s" fill="var(--ink-3)">← both semantics</text>
+
+      <rect x="886" y="230" width="150" height="50" rx="6" fill="var(--oxide-soft)" stroke="var(--oxide)"/>
+      <text x="961" y="252" text-anchor="middle" class="s" fill="var(--ink)">quality_semantic</text>
+      <text x="961" y="268" text-anchor="middle" class="s" fill="var(--ink-3)">← forecast</text>
+
+      <line x1="336" y1="175" x2="354" y2="175" stroke="var(--ink-3)" stroke-width="1.3"/>
+      <line x1="506" y1="175" x2="526" y2="147" stroke="var(--ink-3)" stroke-width="1.3"/>
+      <line x1="506" y1="175" x2="526" y2="211" stroke="var(--ink-3)" stroke-width="1.3"/>
+      <line x1="676" y1="147" x2="704" y2="147" stroke="var(--ink-3)" stroke-width="1.3"/>
+      <line x1="676" y1="211" x2="704" y2="211" stroke="var(--ink-3)" stroke-width="1.3"/>
+      <line x1="856" y1="147" x2="886" y2="175" stroke="var(--ink-3)" stroke-width="1.3"/>
+      <line x1="856" y1="211" x2="886" y2="175" stroke="var(--ink-3)" stroke-width="1.3"/>
+      <line x1="961" y1="200" x2="961" y2="228" stroke="var(--ink-3)" stroke-width="1.3"/>
+    </svg>
+    <figcaption>
+      <b>Facts wait on dimensions. Marts wait on facts. Quality waits on the forecast.</b>
+      Dataset URIs are files under <code>/opt/airflow/datasets/</code>.
+      The watermark task (bronze/silver) or <code>end_task</code> (gold) is the outlet that fires the next DAG.
+    </figcaption>
+  </figure>
+
+  <div class="grid-2" style="margin-top:8px">
+    <div class="card">
+      <span class="label">Tables in pipeline_configs</span>
+      <ul>
+        <li><code>pipeline_jobs</code> — name, schedule, is_cdc, last_cdc_value, JSON parameters</li>
+        <li><code>pipeline_tasks</code> — file_path, sequence, params for gold/semantic</li>
+        <li><code>table_columns</code> — JSON column_map used by sql_builder</li>
+        <li><code>table_ddl</code> — CREATE TABLE for bronze Delta tables</li>
+        <li><code>dataset</code> — Airflow Dataset name + comma-separated dependencies</li>
+        <li><code>ingestion_runs</code> — start/end, status, rows, error_message</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="label">Schema evolution</span>
+      <p>
+        Bronze: extras → <code>_additional_attributes</code> JSON.
+        Silver: distinct JSON keys become VARCHAR columns; missing ones get <code>ALTER TABLE … ADD COLUMN</code> before MERGE.
+        Gold SQL is explicit and does not auto-project overflow keys — modelling stays a decision, not an accident.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- 06 STACK -->
+<section id="stack">
+  <div class="sec-head">
+    <span class="num">06</span>
+    <h2>Stack, as it actually runs</h2>
+  </div>
+
+  <div class="filemap">
+    <div class="frow">
+      <div class="path">simpleStoreSetup</div>
+      <p>React 18 + Vite 5, FastAPI 0.104, SQLAlchemy 2, PyMySQL. Frontend :3000, backend published :8001. Shares kafkaSetup MySQL. Analytics endpoints recompute KPIs on OLTP, not ClickHouse.</p>
+    </div>
+    <div class="frow">
+      <div class="path">dummyData</div>
+      <p>Python generator (pymysql) and a CSV writer. Defaults 100 / 25 / 250 / 400. Dockerfile for a one-shot loader on host network.</p>
+    </div>
+    <div class="frow">
+      <div class="path">kafkaSetup</div>
+      <p>MySQL 8.0, Debezium Kafka + Zookeeper + Connect, Conduktor, Postgres for Conduktor. Redis, MinIO, ClickHouse, MailHog exist in compose but are commented out here — MinIO/ClickHouse live under trinoSetup.</p>
+    </div>
+    <div class="frow">
+      <div class="path">pipelineSetup</div>
+      <p>Airflow 2.8.1 (custom image: pymysql, trino, clickhouse-connect, numpy, pandas, scikit-learn), Postgres :5435, Superset :8088 + Redis, Timeplus :8000. DAGs under <code>airflow/dags</code>, SQL under <code>airflow/jobs</code>.</p>
+    </div>
+    <div class="frow">
+      <div class="path">trinoSetup</div>
+      <p>Active <code>docker-compose.yml</code> starts ClickHouse 23.8 (:8123). The lakehouse cluster — Trino, Hive Metastore, MinIO, metastore Postgres — is in <code>docker-compose_no.yml</code>. Catalogs on disk: delta_lake, mysql, clickhouse, postgresql, hive, iceberg, minio.</p>
+    </div>
+  </div>
+
+  <div class="col" style="margin-top:1.6rem">
+    <p>
+      Trino catalogs that the pipeline <em>uses</em>: <code>mysql</code> (source),
+      <code>delta_lake</code> (medallion on MinIO via Hive Metastore),
+      <code>clickhouse</code> (available for federated SQL). Iceberg and Hive
+      catalogs are configured; no DAG writes Iceberg tables.
+      ClickHouse gold tables use <code>ReplacingMergeTree(_ver)</code> or
+      <code>ReplacingMergeTree(generated_at)</code> so later loads win.
+    </p>
+  </div>
+
+  <div class="t-wrap">
+    <table>
+      <thead>
+        <tr><th>Surface</th><th>Where</th><th>Role</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Store UI</td><td class="mono">:3000</td><td>Customer / merchant product</td></tr>
+        <tr><td>Store API</td><td class="mono">FastAPI /docs</td><td>CRUD + OLTP analytics</td></tr>
+        <tr><td>Airflow</td><td class="mono">:8081</td><td>Orchestration, Dataset graph, logs</td></tr>
+        <tr><td>Kafka Connect</td><td class="mono">:8083</td><td>Debezium REST</td></tr>
+        <tr><td>Conduktor</td><td class="mono">:8087</td><td>Inspect CDC topics</td></tr>
+        <tr><td>Superset</td><td class="mono">:8088</td><td>Dashboards on gold</td></tr>
+        <tr><td>MinIO console</td><td class="mono">:9001</td><td>Object store for Delta</td></tr>
+        <tr><td>ClickHouse HTTP</td><td class="mono">:8123</td><td>Marts, forecast, quality</td></tr>
+        <tr><td>Timeplus</td><td class="mono">:8000</td><td>Streaming SQL playground (no gold writer in DAGs)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 07 DECISIONS -->
+<section id="decisions">
+  <div class="sec-head">
+    <span class="num">07</span>
+    <h2>Design decisions worth keeping</h2>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>Trino is the ETL engine</h3>
+      <p>
+        One SQL dialect moves data between MySQL, Delta, and (when needed) ClickHouse.
+        Airflow’s job is schedule, XCom, retries, and run metadata — not Spark submit.
+        That matches a laptop-sized Docker lab better than a cluster.
+      </p>
+    </div>
+    <div class="card">
+      <h3>CDC and lake load are not the same pipe</h3>
+      <p>
+        Kafka proves that every OLTP mutation is observable.
+        The lake load is a watermarked <code>MERGE</code> so replay is a SQL
+        statement, not a consumer-group offset. Different failure domains.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Config in MySQL, code in templates</h3>
+      <p>
+        Column maps, DDL, schedules, Dataset edges, and gold task lists are data.
+        Five bronze DAGs and five silver DAGs look repetitive on purpose:
+        the variation is in <code>pipeline_configs</code>, not in forked logic.
+      </p>
+    </div>
+    <div class="card">
+      <h3>HLP before DIM</h3>
+      <p>
+        Surrogate assignment is a separate insert-only table.
+        Facts bind to <code>*_sk</code>. Attribute updates do not rewrite fact rows.
+        Product waits on merchant because <code>product_dim.merchant_sk</code> is a dimension-to-dimension key.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Overflow JSON, then promote</h3>
+      <p>
+        <code>_additional_attributes</code> is the safety valve for source schema drift.
+        Silver is where keys become columns. Gold stays a modelled contract.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Two analytics planes</h3>
+      <p>
+        The store UI answers “what is happening in my shop right now” from MySQL.
+        Superset / ClickHouse answer “what was true in gold after the last successful DAG.”
+        That split is honest: the data product does not pretend the warehouse is synchronous.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Forecast is a serving table, not a notebook</h3>
+      <p>
+        Same Dataset chain, same <code>ingestion_runs</code> bookkeeping, ClickHouse
+        <code>ReplacingMergeTree</code> so a new batch supersedes the last.
+        Model: linear trend on day index, mean fallback, zeros for missing days.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Quality is a DAG, not a screenshot</h3>
+      <p>
+        Null audits and sales metrics land in <code>quality_test</code> after forecast,
+        so a broken gold load is visible as rows, not only as an Airflow square.
+      </p>
+    </div>
+  </div>
+
+  <div class="note warn" style="margin-top:1.8rem">
+    <p class="hd">Intentionally not claimed</p>
+    <p>
+      Spark jobs, Kafka sinks into Delta, PostgreSQL as the fact store, Iceberg
+      tables, and Timeplus as a gold writer do not appear in the DAGs or job SQL.
+      They show up in compose comments, extra catalogs, or rubric READMEs.
+      The running architecture is Trino + Delta on MinIO + ClickHouse + Airflow Datasets.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <span class="num">08</span>
+    <h2>What was implemented</h2>
+  </div>
+  <div class="col">
+    <p>
+      End-to-end lab for the course rubric: a working store, seeded OLTP,
+      Debezium CDC, a medallion lakehouse, a Kimball gold layer, semantic marts,
+      a demand forecast, quality logging, and dashboards — all locally on Docker.
+    </p>
+    <ul>
+      <li>OLTP schema, FastAPI contracts, and dual-mode React UI against the shared MySQL.</li>
+      <li>Binlog CDC with a registered Debezium connector and Conduktor inspection.</li>
+      <li>Schema-driven bronze/silver Trino pipelines with watermarks, MERGE, and run metadata.</li>
+      <li>Gold HLP/DIM/FCT SQL, MinIO → ClickHouse copy, Dataset-ordered transformers.</li>
+      <li>Nine semantic marts, 5-day product forecast, null and sales quality tables.</li>
+      <li>Trino catalogs, Hive Metastore, MinIO buckets, ClickHouse init DDL, Airflow custom image.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <p>
+    <strong style="color:var(--ink-2)">Simple Store Lakehouse</strong> —
+    Data-Driven Computing Architecture, Åbo Akademi.
+    Drawn from compose files, Airflow DAGs, <code>pipeline_configs</code> seed SQL,
+    gold DDL, and the store backend — not from the rubric README’s Spark path.
+  </p>
+  <p class="mono" style="margin-top:.7rem">
+    flow.html · self-contained · no secrets copied from .env
+  </p>
+</footer>
+
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById("themeToggle");
+  var stored = null;
+  try { stored = localStorage.getItem("ddca-theme"); } catch (e) {}
+  if (stored === "light" || stored === "dark") root.setAttribute("data-theme", stored);
+
+  function label() {
+    var t = root.getAttribute("data-theme");
+    if (t === "dark") return "Light";
+    if (t === "light") return "Dark";
+    return "Theme";
+  }
+  function applyLabel() { if (btn) btn.textContent = label(); }
+  applyLabel();
+
+  if (btn) {
+    btn.addEventListener("click", function () {
+      var cur = root.getAttribute("data-theme");
+      var next;
+      if (cur === "dark") next = "light";
+      else if (cur === "light") next = "dark";
+      else next = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("ddca-theme", next); } catch (e) {}
+      applyLabel();
+    });
+  }
+})();
+</script>
+</body>
+</html>

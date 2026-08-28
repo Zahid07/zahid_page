@@ -1,0 +1,1364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ACME Analytics Pipeline — How it works</title>
+<meta name="description" content="A Spark Structured Streaming CDC pipeline: PostgreSQL WAL to Debezium to Kafka to four foreachBatch sinks into an analytical star, served by FastAPI and React.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+  :root {
+    --paper:      #F1F3F2;
+    --surface:    #FAFBFA;
+    --surface-2:  #E7EBE9;
+    --ink:        #16201F;
+    --ink-2:      #3E4C4A;
+    --ink-3:      #6B7A77;
+    --rule:       #CFD8D5;
+    --rule-soft:  #DFE5E3;
+    --pine:       #0F6E63;
+    --pine-soft:  #DCEBE8;
+    --amber:      #9A5B00;
+    --amber-soft: #F5E8D2;
+    --oxide:      #9E2B18;
+    --oxide-soft: #F6DED9;
+    --shadow: 0 1px 2px rgba(22,32,31,.06), 0 8px 24px -12px rgba(22,32,31,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0E1413;
+      --surface:    #151D1C;
+      --surface-2:  #1E2827;
+      --ink:        #E4EAE8;
+      --ink-2:      #B0BEBB;
+      --ink-3:      #7F8F8C;
+      --rule:       #2C3937;
+      --rule-soft:  #222D2C;
+      --pine:       #5FC4B4;
+      --pine-soft:  #12312D;
+      --amber:      #D99A4E;
+      --amber-soft: #33240F;
+      --oxide:      #E08575;
+      --oxide-soft: #381914;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #0E1413;
+    --surface:    #151D1C;
+    --surface-2:  #1E2827;
+    --ink:        #E4EAE8;
+    --ink-2:      #B0BEBB;
+    --ink-3:      #7F8F8C;
+    --rule:       #2C3937;
+    --rule-soft:  #222D2C;
+    --pine:       #5FC4B4;
+    --pine-soft:  #12312D;
+    --amber:      #D99A4E;
+    --amber-soft: #33240F;
+    --oxide:      #E08575;
+    --oxide-soft: #381914;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 24px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  .col  { max-width: 68ch; }
+
+  h1, h2, h3, .label, .stage-n, th, .mono { font-family: "Archivo", "Helvetica Neue", Arial, sans-serif; }
+
+  h1 {
+    font-size: clamp(2.1rem, 5vw, 3.1rem);
+    font-weight: 700;
+    letter-spacing: -.025em;
+    line-height: 1.05;
+    text-wrap: balance;
+    margin: 0 0 .5rem;
+  }
+  h2 {
+    font-size: clamp(1.35rem, 2.4vw, 1.7rem);
+    font-weight: 600;
+    letter-spacing: -.015em;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h3 {
+    font-size: 1.02rem;
+    font-weight: 600;
+    letter-spacing: -.005em;
+    margin: 0 0 .4rem;
+  }
+  p { margin: 0 0 1.05rem; }
+  a { color: var(--pine); text-underline-offset: 3px; }
+  strong { font-weight: 600; }
+  em { font-style: italic; color: var(--ink-2); }
+
+  .label {
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .lede {
+    font-size: 1.16rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 60ch;
+  }
+
+  code, .mono, pre { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+  code {
+    font-size: .85em;
+    background: var(--surface-2);
+    padding: .12em .38em;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 6px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: .82rem;
+    line-height: 1.6;
+    margin: 0 0 1.2rem;
+    color: var(--ink-2);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  pre .c { color: var(--ink-3); }
+  pre .h { color: var(--pine); font-weight: 600; }
+
+  .theme-toggle {
+    position: fixed; top: 16px; right: 18px; z-index: 20;
+    font-family: "Archivo", sans-serif;
+    font-size: .68rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+    background: var(--surface); color: var(--ink-2);
+    border: 1px solid var(--rule); border-radius: 999px;
+    padding: .42rem .8rem; cursor: pointer;
+    box-shadow: var(--shadow);
+  }
+  .theme-toggle:hover { border-color: var(--pine); color: var(--pine); }
+
+  header.masthead {
+    padding: 72px 0 40px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 8px;
+  }
+  .kicker {
+    display: flex; gap: 14px; align-items: baseline;
+    margin-bottom: 22px; flex-wrap: wrap;
+  }
+  .kicker .sep { color: var(--rule); }
+
+  .byline {
+    margin-top: 1.8rem; display: flex; flex-wrap: wrap; gap: .5rem 1.3rem;
+    font-family: "JetBrains Mono", monospace; font-size: .76rem; color: var(--ink-3);
+  }
+  .byline span { display: inline-flex; align-items: center; gap: .42rem; }
+  .byline span::before {
+    content: ""; width: 5px; height: 5px; background: var(--pine); border-radius: 50%; flex: none;
+  }
+
+  .strip { margin-top: 2.4rem; }
+  .strip-track { display: flex; gap: .4rem; overflow-x: auto; padding-bottom: .5rem; scrollbar-width: thin; }
+  .stage-chip {
+    flex: 1 1 0; min-width: 108px; text-decoration: none; color: inherit;
+    border: 1px solid var(--rule); border-radius: 4px; background: var(--surface);
+    padding: .62rem .7rem .68rem; display: block;
+    transition: border-color .18s ease, transform .18s ease;
+  }
+  .stage-chip:hover { border-color: var(--pine); transform: translateY(-2px); }
+  .stage-chip .n { font-family: "JetBrains Mono", monospace; font-size: .7rem; color: var(--pine); font-weight: 700; }
+  .stage-chip .t { display: block; font-family: "Archivo", sans-serif; font-size: .79rem; font-weight: 600; line-height: 1.25; margin-top: .18rem; }
+  .stage-chip .m { display: block; font-family: "JetBrains Mono", monospace; font-size: .64rem; color: var(--ink-3); margin-top: .3rem; }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--rule-soft); }
+  section:last-of-type { border-bottom: none; }
+  .sec-head { display: flex; gap: 18px; align-items: baseline; margin-bottom: 28px; }
+  .sec-head .num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; font-weight: 700;
+    color: var(--pine);
+    padding-top: .35em;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+
+  .pipeline { display: flex; flex-direction: column; gap: 0; margin-top: 8px; }
+  .stage {
+    display: grid;
+    grid-template-columns: 58px 1fr;
+    gap: 22px;
+    position: relative;
+    padding: 22px 0;
+  }
+  .stage:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: 28px; top: 56px; bottom: -6px;
+    width: 2px;
+    background: linear-gradient(var(--rule), var(--rule-soft));
+  }
+  .stage-n {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--surface);
+    border: 2px solid var(--rule);
+    font-size: .82rem; font-weight: 700;
+    color: var(--ink-2);
+    position: relative; z-index: 1;
+  }
+  .stage.src .stage-n { border-color: var(--amber); color: var(--amber); }
+  .stage.stream .stage-n { border-color: var(--pine); color: var(--pine); }
+  .stage.serve .stage-n { border-color: var(--ink-2); color: var(--ink-2); }
+
+  .stage-body { padding-top: 4px; min-width: 0; }
+  .stage-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  .stage-body p { margin-bottom: .7rem; max-width: 62ch; }
+
+  .chip {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .64rem; font-weight: 500;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: .25em .6em; border-radius: 3px;
+    white-space: nowrap;
+  }
+  .chip.src    { background: var(--amber-soft); color: var(--amber); }
+  .chip.stream { background: var(--pine-soft); color: var(--pine); }
+  .chip.serve  { background: var(--surface-2); color: var(--ink-2); }
+
+  .gate {
+    border-left: 3px solid var(--oxide);
+    background: var(--oxide-soft);
+    padding: 10px 14px;
+    border-radius: 0 4px 4px 0;
+    font-size: .9rem;
+    color: var(--ink);
+    max-width: 62ch;
+  }
+  .gate .label { color: var(--oxide); display: block; margin-bottom: 2px; }
+
+  figure {
+    margin: 1.9rem 0 1rem;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 1.5rem 1.3rem 1.1rem;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  figcaption {
+    font-family: "Archivo", sans-serif;
+    font-size: .75rem;
+    color: var(--ink-3);
+    margin-top: 1rem;
+    padding-top: .85rem;
+    border-top: 1px solid var(--rule);
+    line-height: 1.5;
+  }
+  figcaption strong { color: var(--ink); font-family: "Archivo", sans-serif; }
+  svg { display: block; max-width: 100%; height: auto; }
+  .l { font-family: "Archivo", sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .m { font-family: "JetBrains Mono", monospace; font-size: 11px; }
+  .s { font-family: "JetBrains Mono", monospace; font-size: 10px; }
+
+  .t-wrap { overflow-x: auto; border: 1px solid var(--rule-soft); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th {
+    text-align: left;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { color: var(--ink); }
+  td.num { font-family: "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+
+  .filemap {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .frow {
+    display: grid;
+    grid-template-columns: minmax(210px, 280px) 1fr;
+    gap: 20px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--rule-soft);
+    align-items: baseline;
+  }
+  .frow:last-child { border-bottom: none; }
+  .frow .path {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .78rem;
+    color: var(--pine);
+    word-break: break-word;
+  }
+  .frow .what { font-size: .93rem; color: var(--ink-2); }
+  .frow .what b { color: var(--ink); font-weight: 600; }
+
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--pine);
+    border-radius: 0 6px 6px 0;
+    padding: 16px 20px;
+    max-width: 66ch;
+  }
+  .note.warn { border-left-color: var(--amber); }
+  .note.stop { border-left-color: var(--oxide); }
+  .note p:last-child { margin-bottom: 0; }
+  .note .hd {
+    font-family: "Archivo", sans-serif;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--pine); margin: 0 0 .4rem;
+  }
+  .note.warn .hd { color: var(--amber); }
+  .note.stop .hd { color: var(--oxide); }
+
+  .decisions { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .decision { background: var(--surface); padding: 1.3rem clamp(16px, 2.4vw, 26px); }
+  .decision h3 { margin-bottom: .2rem; }
+  .decision .verdict {
+    font-family: "JetBrains Mono", monospace; font-size: .72rem;
+    color: var(--ink-3); letter-spacing: .06em; text-transform: uppercase; margin-bottom: .5rem;
+  }
+  .decision p { font-size: .92rem; color: var(--ink-2); margin-bottom: .55rem; }
+  .decision .alt {
+    font-size: .86rem; color: var(--ink-3);
+    border-top: 1px dashed var(--rule); padding-top: .55rem; margin: 0;
+  }
+  .decision .alt b { color: var(--ink-2); font-weight: 600; }
+
+  ul { margin: 0 0 1.05rem; padding-left: 1.25rem; }
+  li { margin-bottom: .4rem; }
+
+  footer {
+    padding-top: 40px;
+    color: var(--ink-3);
+    font-size: .88rem;
+    border-top: 1px solid var(--rule-soft);
+    margin-top: 20px;
+  }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; padding: 0 18px 64px; }
+    .stage { grid-template-columns: 40px 1fr; gap: 16px; }
+    .stage-n { width: 40px; height: 40px; font-size: .72rem; }
+    .stage:not(:last-child)::after { left: 19px; top: 42px; }
+    .frow { grid-template-columns: 1fr; gap: 4px; }
+    .sec-head { gap: 12px; }
+    .theme-toggle { top: 10px; right: 10px; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: opacity .15s ease; }
+    a:hover { opacity: .75; }
+  }
+  :focus-visible { outline: 2px solid var(--pine); outline-offset: 2px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<button class="theme-toggle" type="button" id="theme-toggle" aria-label="Toggle colour theme">Theme</button>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="kicker">
+      <span class="label">Deel take-home</span>
+      <span class="sep">/</span>
+      <span class="label">ACME Delivery Services</span>
+      <span class="sep">/</span>
+      <span class="label">CDC → Spark → analytical star</span>
+    </div>
+    <h1>How the analytics pipeline works</h1>
+    <p class="lede">
+      Four Kafka topics, four Spark Structured Streaming queries, one PostgreSQL instance
+      split into <code>operations</code> and <code>analytical</code>. Change data capture
+      from the WAL becomes a queryable dimensional model every ten seconds.
+    </p>
+    <div class="byline">
+      <span>PostgreSQL 12 + pg_cron</span>
+      <span>Debezium pgoutput</span>
+      <span>Spark 3.5.0 local[4]</span>
+      <span>FastAPI + React, poll 10s</span>
+    </div>
+
+    <div class="strip">
+      <p class="label" style="margin-bottom:.9rem;">End to end — eight stages</p>
+      <div class="strip-track">
+        <a class="stage-chip" href="#s01"><span class="n">01</span><span class="t">Source OLTP</span><span class="m">operations.*</span></a>
+        <a class="stage-chip" href="#s02"><span class="n">02</span><span class="t">WAL CDC</span><span class="m">pgoutput slot</span></a>
+        <a class="stage-chip" href="#s03"><span class="n">03</span><span class="t">Debezium</span><span class="m">Connect 8083</span></a>
+        <a class="stage-chip" href="#s04"><span class="n">04</span><span class="t">Kafka</span><span class="m">4 topics</span></a>
+        <a class="stage-chip" href="#s05"><span class="n">05</span><span class="t">Spark</span><span class="m">foreachBatch</span></a>
+        <a class="stage-chip" href="#s06"><span class="n">06</span><span class="t">Sink</span><span class="m">staging MERGE</span></a>
+        <a class="stage-chip" href="#s07"><span class="n">07</span><span class="t">Warehouse</span><span class="m">SCD Type 4</span></a>
+        <a class="stage-chip" href="#s08"><span class="n">08</span><span class="t">Serve</span><span class="m">API + UI</span></a>
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">01</span>
+      <h2>The shape of the system</h2>
+    </div>
+    <div class="col">
+      <p>
+        ACME Delivery Services needed near-real-time answers over a living order book:
+        open orders by delivery date, the busiest upcoming dates, pending items by product,
+        and the customers with the most pending orders. The starter stack already wrote
+        those orders into PostgreSQL. The work was to stream every insert and update into
+        a dimensional schema that those four questions can hit without scanning OLTP.
+      </p>
+      <p>
+        Source and sink share one Postgres, two schemas. <code>operations</code> is the
+        transactional system of record. <code>analytical</code> is the warehouse Spark
+        writes. They never share tables. They meet only through Debezium, Kafka, and the
+        four streaming queries in <code>implementation/main.py</code>.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 340" role="img" aria-label="End-to-end flow from operations PostgreSQL through Debezium, Kafka, Spark, and the analytical schema to the dashboard">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="8" y="86" width="150" height="118" rx="7" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="1.6"/>
+        <text x="83" y="112" text-anchor="middle" class="l" fill="var(--amber)">operations</text>
+        <text x="83" y="134" text-anchor="middle" class="s" fill="var(--ink-2)">customers</text>
+        <text x="83" y="150" text-anchor="middle" class="s" fill="var(--ink-2)">products</text>
+        <text x="83" y="166" text-anchor="middle" class="s" fill="var(--ink-2)">orders</text>
+        <text x="83" y="182" text-anchor="middle" class="s" fill="var(--ink-2)">order_items</text>
+
+        <text x="83" y="72" text-anchor="middle" class="s" fill="var(--amber)">pg_cron</text>
+        <line x1="83" y1="78" x2="83" y2="86" stroke="var(--amber)" stroke-width="1.3"/>
+
+        <line x1="158" y1="145" x2="188" y2="145" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="173" y="136" text-anchor="middle" class="s" fill="var(--ink-3)">WAL</text>
+
+        <rect x="190" y="104" width="132" height="82" rx="7" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="256" y="136" text-anchor="middle" class="l" fill="var(--ink)">Debezium</text>
+        <text x="256" y="156" text-anchor="middle" class="s" fill="var(--ink-3)">pgoutput slot</text>
+        <text x="256" y="172" text-anchor="middle" class="s" fill="var(--ink-3)">finance-db-connector</text>
+
+        <line x1="322" y1="145" x2="352" y2="145" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <rect x="354" y="78" width="168" height="134" rx="7" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="1.6"/>
+        <text x="438" y="104" text-anchor="middle" class="l" fill="var(--pine)">Kafka</text>
+        <text x="438" y="126" text-anchor="middle" class="s" fill="var(--ink-2)">…operations.customers</text>
+        <text x="438" y="142" text-anchor="middle" class="s" fill="var(--ink-2)">…operations.products</text>
+        <text x="438" y="158" text-anchor="middle" class="s" fill="var(--ink-2)">…operations.orders</text>
+        <text x="438" y="174" text-anchor="middle" class="s" fill="var(--ink-2)">…operations.order_items</text>
+        <text x="438" y="196" text-anchor="middle" class="s" fill="var(--pine)">prefix finance_db</text>
+
+        <line x1="522" y1="145" x2="552" y2="145" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <rect x="554" y="78" width="176" height="134" rx="7" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="1.6"/>
+        <text x="642" y="104" text-anchor="middle" class="l" fill="var(--pine)">Spark 3.5.0</text>
+        <text x="642" y="126" text-anchor="middle" class="s" fill="var(--ink-2)">4 StreamingQueries</text>
+        <text x="642" y="142" text-anchor="middle" class="s" fill="var(--ink-2)">local[4] · 10 s trigger</text>
+        <text x="642" y="158" text-anchor="middle" class="s" fill="var(--ink-2)">parse envelope</text>
+        <text x="642" y="180" text-anchor="middle" class="s" fill="var(--pine)">foreachBatch</text>
+
+        <line x1="730" y1="145" x2="760" y2="145" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <rect x="762" y="78" width="150" height="134" rx="7" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="837" y="104" text-anchor="middle" class="l" fill="var(--ink)">analytical</text>
+        <text x="837" y="126" text-anchor="middle" class="s" fill="var(--ink-2)">dims + facts</text>
+        <text x="837" y="142" text-anchor="middle" class="s" fill="var(--ink-2)">*_history</text>
+        <text x="837" y="158" text-anchor="middle" class="s" fill="var(--ink-2)">*_staging</text>
+        <text x="837" y="180" text-anchor="middle" class="s" fill="var(--ink-3)">same Postgres</text>
+
+        <line x1="912" y1="145" x2="940" y2="145" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <rect x="942" y="86" width="130" height="118" rx="7" fill="var(--surface)" stroke="var(--ink-2)"/>
+        <text x="1007" y="118" text-anchor="middle" class="l" fill="var(--ink)">Serve</text>
+        <text x="1007" y="140" text-anchor="middle" class="s" fill="var(--ink-2)">FastAPI :8001</text>
+        <text x="1007" y="156" text-anchor="middle" class="s" fill="var(--ink-2)">React :3000</text>
+        <text x="1007" y="178" text-anchor="middle" class="s" fill="var(--ink-3)">poll 10 s</text>
+
+        <text x="8" y="246" class="l" fill="var(--ink-3)">Compose files, in start order</text>
+        <rect x="8" y="258" width="250" height="58" rx="6" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="22" y="282" class="m" fill="var(--ink)">docker-compose.yaml</text>
+        <text x="22" y="300" class="s" fill="var(--ink-3)">PG · Kafka · Connect · Conduktor</text>
+        <rect x="270" y="258" width="268" height="58" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="284" y="282" class="m" fill="var(--pine)">docker-compose-spark.yaml</text>
+        <text x="284" y="300" class="s" fill="var(--ink-3)">joins finance-shared-net</text>
+        <rect x="550" y="258" width="272" height="58" rx="6" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="564" y="282" class="m" fill="var(--ink)">visualization/docker-compose.yml</text>
+        <text x="564" y="300" class="s" fill="var(--ink-3)">API via host.docker.internal:5432</text>
+      </svg>
+      <figcaption>
+        <strong>One database, two schemas, three compose files.</strong>
+        Spark cannot start until <code>finance-shared-net</code> exists. The visualization
+        backend does not join that network; it reaches Postgres through
+        <code>host.docker.internal:5432</code>.
+      </figcaption>
+    </figure>
+
+    <div class="grid-2" style="margin-top:8px">
+      <div class="note">
+        <p class="hd">Must-haves this shape serves</p>
+        <p style="font-size:.93rem;color:var(--ink-2)">
+          Current order state lives in <code>fact_orders</code>. Full change history lives
+          in <code>*_history</code> (SCD Type 4). Ten-second micro-batches keep the
+          dashboard within one trigger of the WAL.
+        </p>
+      </div>
+      <div class="note">
+        <p class="hd">What this page is drawn from</p>
+        <p style="font-size:.93rem;color:var(--ink-2)">
+          Implementation code, DDL, connector JSON, compose files, and
+          <code>EXECUTION_README.md</code>. Where the solution PDF disagrees with the
+          repo, the code wins.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">02</span>
+      <h2>The stack, as wired</h2>
+    </div>
+    <div class="col">
+      <p>
+        The take-home starter provided the OLTP database, Debezium, Kafka, and Conduktor.
+        The solution added the Spark consumer, the analytical DDL, and the visualization
+        pair. Versions below are what the Dockerfiles and compose files actually pin.
+      </p>
+    </div>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr><th>Layer</th><th>What runs</th><th>Where</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Source OLTP</td>
+            <td>PostgreSQL 12, <code>pg_cron</code>, <code>wal_level=logical</code></td>
+            <td><code>docker/postgres-db</code> · service <code>transactions-db</code></td>
+          </tr>
+          <tr>
+            <td>CDC</td>
+            <td>Debezium Postgres connector, plugin <code>pgoutput</code>, slot <code>cdc_pgoutput</code></td>
+            <td><code>debezium/connectors/finance-db-connector.json</code></td>
+          </tr>
+          <tr>
+            <td>Broker</td>
+            <td>Debezium Kafka image. Inside the network: <code>kafka:9092</code>. On the host: advertised <code>:9094</code></td>
+            <td><code>docker-compose.yaml</code></td>
+          </tr>
+          <tr>
+            <td>Connect</td>
+            <td>Debezium Connect on <code>:8083</code>. One-shot <code>debezium-init</code> POSTs the connector JSON</td>
+            <td><code>debezium/init-connectors.py</code></td>
+          </tr>
+          <tr>
+            <td>Stream processor</td>
+            <td>PySpark 3.5.0 on <code>apache/spark:3.5.0</code>, <code>local[4]</code>, 2g driver/executor, shuffle partitions 2</td>
+            <td><code>implementation/</code> · <code>docker-compose-spark.yaml</code></td>
+          </tr>
+          <tr>
+            <td>Analytical sink</td>
+            <td>Same Postgres, schema <code>analytical</code>. JDBC write + psycopg2 MERGE</td>
+            <td><code>db-scripts/initialize_analytics_ddl.sql</code></td>
+          </tr>
+          <tr>
+            <td>API</td>
+            <td>FastAPI 0.115, four GET endpoints, inline SQL over analytical tables</td>
+            <td><code>visualization/backend/main.py</code> · host port 8001</td>
+          </tr>
+          <tr>
+            <td>UI</td>
+            <td>React 18 + Vite 5, four report panels, runtime contract checks, 10s poll</td>
+            <td><code>visualization/frontend</code> · host port 3000</td>
+          </tr>
+          <tr>
+            <td>Ops UI</td>
+            <td>Conduktor on <code>:8087</code>, Spark UI on <code>:4040</code></td>
+            <td>core stack + spark-consumer</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="flow">
+    <div class="sec-head">
+      <span class="num">03</span>
+      <h2>The flow</h2>
+    </div>
+    <div class="col">
+      <p>
+        Eight stages. Order is load-bearing: Spark joins an external Docker network the
+        core stack creates, and the dashboard assumes Postgres is already accepting
+        connections on the host.
+      </p>
+    </div>
+
+    <div class="pipeline">
+
+      <div class="stage src" id="s01">
+        <div class="stage-n">01</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Source OLTP writes</h3>
+            <span class="chip src">operations</span>
+          </div>
+          <p>
+            Four tables in <code>operations</code>: <code>customers</code>,
+            <code>products</code>, <code>orders</code>, <code>order_items</code>.
+            Each has <code>REPLICA IDENTITY FULL</code> so Debezium can emit a complete
+            <code>before</code> image. A stored-procedure generator seeds the database
+            and then <code>pg_cron</code> keeps it moving:
+          </p>
+          <p>
+            <code>update_customers(5)</code> every 2 minutes,
+            <code>update_products(10)</code> every 2 minutes,
+            <code>generate_orders(100)</code> every minute. New orders start as
+            <code>PENDING</code> with <code>delivery_date = CURRENT_DATE + 10</code>;
+            later updates pick <code>PROCESSING</code>, <code>COMPLETED</code>, or
+            <code>REPROCESSING</code>.
+          </p>
+          <p>
+            Source line items store quantity in a column named <code>quanity</code> —
+            a typo in the starter DDL. That spelling is the reason
+            <code>_additional_columns</code> exists as more than a drift hedge.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage src" id="s02">
+        <div class="stage-n">02</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Logical decoding</h3>
+            <span class="chip src">WAL</span>
+          </div>
+          <p>
+            Postgres starts with <code>wal_level=logical</code>. Init SQL creates
+            replication slot <code>cdc_pgoutput</code> (plugin <code>pgoutput</code>)
+            and publication <code>cdc_publication</code> for all tables. A dedicated
+            replication user <code>cdc_user</code> is granted <code>CONNECT</code>,
+            schema <code>USAGE</code>, and <code>SELECT</code> on <code>operations</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage stream" id="s03">
+        <div class="stage-n">03</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Debezium connector</h3>
+            <span class="chip stream">Kafka Connect</span>
+          </div>
+          <p>
+            <code>debezium-init</code> waits until Connect answers
+            <code>/connectors</code> with HTTP 200, then POSTs
+            <code>finance-db-connector.json</code>. Topic prefix is
+            <code>finance_db</code>. Include list is the four <code>operations</code>
+            tables. JSON converters run with schemas disabled. The slot is not dropped
+            on connector stop.
+          </p>
+          <div class="gate">
+            <span class="label">Start order</span>
+            Core compose must be up before Spark. Connect must be healthy before the
+            init container can register the connector. Spark reading empty topics is
+            fine; Spark reading a missing broker is not.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage stream" id="s04">
+        <div class="stage-n">04</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Four Kafka topics</h3>
+            <span class="chip stream">log</span>
+          </div>
+          <p>
+            Topic names are <code>&lt;prefix&gt;.&lt;schema&gt;.&lt;table&gt;</code>,
+            matching <code>implementation/config.py</code>:
+          </p>
+          <p>
+            <code>finance_db.operations.customers</code>,
+            <code>finance_db.operations.products</code>,
+            <code>finance_db.operations.orders</code>,
+            <code>finance_db.operations.order_items</code>.
+          </p>
+          <p>
+            Inside Docker, Spark uses <code>kafka:9092</code> (the INSIDE listener).
+            On the host, <code>config.py</code> defaults to port <code>9094</code>
+            (OUTSIDE). That split is why local <code>spark-submit</code> and the
+            containered consumer do not share a bootstrap address.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage stream" id="s05">
+        <div class="stage-n">05</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Four Spark queries, one session</h3>
+            <span class="chip stream">local[4]</span>
+          </div>
+          <p>
+            <code>main.py</code> validates the analytical schema, builds a SparkSession
+            named <code>acme-analytics</code>, and starts all four streams. It then
+            <code>awaitAnyTermination()</code>. Each query reads from earliest offsets,
+            sets <code>failOnDataLoss</code> to false, checkpoints under
+            <code>./checkpoints/&lt;entity&gt;</code>, and triggers every
+            <code>10 seconds</code>.
+          </p>
+          <p>
+            <code>local[4]</code> is intentional: four concurrent streams, four threads,
+            so a JDBC write in one query does not starve the Kafka readers of the others.
+            Shuffle partitions are 2. Checkpoints live on the
+            <code>spark-checkpoints</code> volume so a container restart resumes offsets.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage stream" id="s06">
+        <div class="stage-n">06</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Staging overwrite, then MERGE</h3>
+            <span class="chip stream">foreachBatch</span>
+          </div>
+          <p>
+            Spark JDBC cannot upsert. Every micro-batch therefore: drop <code>op</code>,
+            <code>coalesce(1)</code> so there is one JDBC connection, overwrite the
+            staging table, run <code>INSERT … ON CONFLICT DO UPDATE</code> via psycopg2,
+            append the same staging rows into the history table where one exists, then
+            <code>TRUNCATE</code> staging. Truncate failure is a warning — the next
+            overwrite replaces the table anyway.
+          </p>
+          <p>
+            Staging tables are <code>LIKE … INCLUDING DEFAULTS EXCLUDING CONSTRAINTS</code>
+            so a child row can land before its parent without a foreign-key failure.
+            That is how the design absorbs CDC ordering lag.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage serve" id="s07">
+        <div class="stage-n">07</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Dimensional warehouse</h3>
+            <span class="chip serve">SCD 4</span>
+          </div>
+          <p>
+            Current-state tables: <code>dim_customer</code>, <code>dim_product</code>,
+            <code>fact_orders</code>, <code>fact_order_items</code>. History tables for
+            customers, products, and orders. No history table for order items.
+            Every current-state row also stores <code>_kafka_offset</code> and
+            <code>_additional_columns</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage serve" id="s08">
+        <div class="stage-n">08</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>API and dashboard</h3>
+            <span class="chip serve">10 s poll</span>
+          </div>
+          <p>
+            FastAPI exposes four versioned GET routes. Each runs SQL against
+            <code>analytical</code> tables and returns <code>contract_version</code>,
+            <code>generated_at</code>, and <code>data</code>. React validates that
+            shape before render and polls on the same 10-second cadence as Spark.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">04</span>
+      <h2>What a CDC event becomes</h2>
+    </div>
+    <div class="col">
+      <p>
+        <code>utils/debezium.py</code> owns the envelope. Each consumer passes only its
+        table schema. The helper wraps that schema as both <code>before</code> and
+        <code>after</code>, parses Kafka <code>value</code> as JSON, and keeps
+        <code>c</code> (create), <code>u</code> (update), and <code>r</code> (snapshot
+        read). Deletes (<code>op = d</code>) are dropped. Soft delete is
+        <code>is_active</code> on the dimension, not a hard remove from the warehouse.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 280" role="img" aria-label="Debezium envelope parsed into flat columns plus op, kafka offset, and additional columns">
+        <defs>
+          <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="10" y="40" width="300" height="200" rx="7" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="26" y="66" class="l" fill="var(--ink-3)">Kafka record</text>
+        <text x="26" y="94" class="m" fill="var(--ink)">offset → _kafka_offset</text>
+        <text x="26" y="118" class="s" fill="var(--ink-2)">value (JSON string)</text>
+        <text x="26" y="148" class="s" fill="var(--ink-3)">before { … }</text>
+        <text x="26" y="166" class="s" fill="var(--pine)">after  { typed columns }</text>
+        <text x="26" y="184" class="s" fill="var(--ink-2)">op     c | u | r | d</text>
+        <text x="26" y="214" class="s" fill="var(--amber)">unknown keys in after</text>
+
+        <line x1="310" y1="140" x2="360" y2="140" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <text x="335" y="128" text-anchor="middle" class="s" fill="var(--ink-3)">filter</text>
+
+        <rect x="362" y="40" width="250" height="200" rx="7" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="378" y="66" class="l" fill="var(--pine)">Kept</text>
+        <text x="378" y="94" class="m" fill="var(--ink)">op ∈ {c, u, r}</text>
+        <text x="378" y="118" class="s" fill="var(--ink-2)">after.* flattened</text>
+        <text x="378" y="138" class="s" fill="var(--ink-2)">op retained</text>
+        <text x="378" y="158" class="s" fill="var(--ink-2)">_kafka_offset</text>
+        <text x="378" y="178" class="s" fill="var(--ink-2)">_additional_columns JSON</text>
+        <text x="378" y="214" class="s" fill="var(--pine)">typed schema + leftovers</text>
+
+        <line x1="612" y1="140" x2="662" y2="140" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+        <rect x="664" y="40" width="400" height="200" rx="7" fill="var(--oxide-soft)" stroke="var(--oxide)"/>
+        <text x="680" y="66" class="l" fill="var(--oxide)">Dropped</text>
+        <text x="680" y="94" class="m" fill="var(--ink)">op = d  (hard delete)</text>
+        <text x="680" y="122" class="s" fill="var(--ink-2)">is_delete() exists as a helper</text>
+        <text x="680" y="138" class="s" fill="var(--ink-2)">but no consumer calls it.</text>
+        <text x="680" y="166" class="s" fill="var(--ink-2)">Dims treat inactivity as</text>
+        <text x="680" y="182" class="s" fill="var(--ink-2)">is_active = false on update,</text>
+        <text x="680" y="198" class="s" fill="var(--ink-2)">not as a tombstone event.</text>
+      </svg>
+      <figcaption>
+        <strong>Snapshot reads are first-class.</strong>
+        <code>r</code> is the connector’s initial dump. Streams start at
+        <code>earliest</code>, so a new checkpoint replays snapshot plus every later
+        change. That is the backfill path when you delete a checkpoint volume.
+      </figcaption>
+    </figure>
+
+    <div class="note warn" style="margin-top:8px">
+      <p class="hd">The quanity column</p>
+      <p>
+        Spark’s order-item schema names the field <code>quantity</code>. The source
+        column is <code>quanity</code>. <code>from_json</code> therefore leaves
+        <code>quantity</code> null, and the leftover key is serialised into
+        <code>_additional_columns</code>. The MERGE writes
+        <code>COALESCE(s.quantity, 0)</code> into the typed column. The pending-items
+        API reads the real figure with
+        <code>COALESCE((_additional_columns::json -&gt;&gt; 'quanity')::INTEGER, oi.quantity, 0)</code>.
+        Schema drift handling is not hypothetical here — it is how Q3 gets a number.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">05</span>
+      <h2>One micro-batch, four consumers</h2>
+    </div>
+    <div class="col">
+      <p>
+        The four <code>process_batch</code> functions are the same skeleton with
+        different SQL. Products and customers also write history. Orders write history
+        and treat a history-insert failure as fatal. Order items skip history, denormalise
+        <code>order_status</code> from <code>fact_orders</code>, and run a status-sync
+        <code>UPDATE</code> even when the Kafka batch is empty.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 250" role="img" aria-label="foreachBatch steps: Kafka micro-batch, JDBC overwrite staging, MERGE, history insert, truncate">
+        <defs>
+          <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="12" y="48" width="150" height="88" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="87" y="80" text-anchor="middle" class="l" fill="var(--pine)">1 · Parse</text>
+        <text x="87" y="102" text-anchor="middle" class="s" fill="var(--ink-2)">envelope → rows</text>
+        <text x="87" y="118" text-anchor="middle" class="s" fill="var(--ink-2)">drop op</text>
+        <line x1="162" y1="92" x2="190" y2="92" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+        <rect x="192" y="48" width="168" height="88" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="276" y="80" text-anchor="middle" class="l" fill="var(--ink)">2 · JDBC write</text>
+        <text x="276" y="102" text-anchor="middle" class="s" fill="var(--ink-2)">coalesce(1)</text>
+        <text x="276" y="118" text-anchor="middle" class="s" fill="var(--ink-2)">mode overwrite</text>
+        <line x1="360" y1="92" x2="388" y2="92" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+        <rect x="390" y="48" width="188" height="88" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="484" y="80" text-anchor="middle" class="l" fill="var(--pine)">3 · MERGE</text>
+        <text x="484" y="102" text-anchor="middle" class="s" fill="var(--ink-2)">INSERT ON CONFLICT</text>
+        <text x="484" y="118" text-anchor="middle" class="s" fill="var(--ink-2)">DISTINCT ON (pk)</text>
+        <line x1="578" y1="92" x2="606" y2="92" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+        <rect x="608" y="48" width="188" height="88" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="702" y="80" text-anchor="middle" class="l" fill="var(--amber)">4 · History</text>
+        <text x="702" y="102" text-anchor="middle" class="s" fill="var(--ink-2)">plain INSERT</text>
+        <text x="702" y="118" text-anchor="middle" class="s" fill="var(--ink-2)">no ON CONFLICT</text>
+        <line x1="796" y1="92" x2="824" y2="92" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+        <rect x="826" y="48" width="240" height="88" rx="6" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="946" y="80" text-anchor="middle" class="l" fill="var(--ink)">5 · Truncate staging</text>
+        <text x="946" y="102" text-anchor="middle" class="s" fill="var(--ink-2)">warning if it fails</text>
+        <text x="946" y="118" text-anchor="middle" class="s" fill="var(--ink-2)">next overwrite covers it</text>
+
+        <text x="12" y="178" class="s" fill="var(--ink-3)">Latest-wins is SQL-side: DISTINCT ON (pk) ORDER BY pk, updated_at DESC NULLS LAST.</text>
+        <text x="12" y="196" class="s" fill="var(--ink-3)">Spark window dedup in products.py / customers.py is commented out. order_items uses dropDuplicates([order_item_id]).</text>
+        <text x="12" y="224" class="s" fill="var(--amber)">Order items add STATUS_SYNC_SQL after MERGE, and also on empty batches, so a status change on the orders stream still lands.</text>
+      </svg>
+      <figcaption>
+        <strong>Overwrite, not append.</strong>
+        The solution write-up describes truncating staging then appending. The running
+        code overwrites the staging table with Spark JDBC <code>mode("overwrite")</code>
+        and truncates afterwards. Both leave staging empty between batches; only the
+        overwrite path matches <code>consumers/*.py</code>.
+      </figcaption>
+    </figure>
+
+    <div class="t-wrap" style="margin-top:18px">
+      <table>
+        <thead>
+          <tr><th>Query</th><th>Kafka topic</th><th>Current table</th><th>History</th><th>Extra</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">products_stream</td>
+            <td class="mono">…products</td>
+            <td class="mono">dim_product</td>
+            <td>yes, non-fatal on error</td>
+            <td>DISTINCT ON product_id</td>
+          </tr>
+          <tr>
+            <td class="mono">customers_stream</td>
+            <td class="mono">…customers</td>
+            <td class="mono">dim_customer</td>
+            <td>yes, non-fatal on error</td>
+            <td>DISTINCT ON customer_id</td>
+          </tr>
+          <tr>
+            <td class="mono">orders_stream</td>
+            <td class="mono">…orders</td>
+            <td class="mono">fact_orders</td>
+            <td>yes, raises on error</td>
+            <td>status defaults to <code>unknown</code></td>
+          </tr>
+          <tr>
+            <td class="mono">order_items_stream</td>
+            <td class="mono">…order_items</td>
+            <td class="mono">fact_order_items</td>
+            <td>none</td>
+            <td>LEFT JOIN orders + status sync</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">06</span>
+      <h2>SCD Type 4, and why status is copied</h2>
+    </div>
+    <div class="col">
+      <p>
+        Current-state tables are upserted. History tables are append-only point-in-time
+        snapshots with <code>recorded_at DEFAULT NOW()</code>. That split is SCD Type 4:
+        a current table you can filter fast, a history table you can replay an order’s
+        lifecycle from. There is no Type 2 <code>valid_from</code> / <code>valid_to</code>
+        on the dimensions.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 300" role="img" aria-label="Current-state tables versus history tables, and order_status copied onto fact_order_items">
+        <text x="12" y="24" class="l" fill="var(--ink-3)">What you query for “now”</text>
+        <rect x="12" y="38" width="300" height="70" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="28" y="64" class="m" fill="var(--pine)">analytical.fact_orders</text>
+        <text x="28" y="86" class="s" fill="var(--ink-2)">PK order_id · latest status</text>
+
+        <rect x="12" y="120" width="300" height="70" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="28" y="146" class="m" fill="var(--pine)">analytical.dim_customer</text>
+        <text x="28" y="168" class="s" fill="var(--ink-2)">PK customer_id · is_active</text>
+
+        <rect x="12" y="202" width="300" height="70" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="28" y="228" class="m" fill="var(--pine)">analytical.dim_product</text>
+        <text x="28" y="250" class="s" fill="var(--ink-2)">PK product_id · unity_price</text>
+
+        <text x="360" y="24" class="l" fill="var(--ink-3)">What you query for “then”</text>
+        <rect x="360" y="38" width="300" height="70" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="376" y="64" class="m" fill="var(--amber)">fact_orders_history</text>
+        <text x="376" y="86" class="s" fill="var(--ink-2)">every CDC event · recorded_at</text>
+
+        <rect x="360" y="120" width="300" height="70" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="376" y="146" class="m" fill="var(--amber)">dim_customer_history</text>
+        <text x="376" y="168" class="s" fill="var(--ink-2)">append-only</text>
+
+        <rect x="360" y="202" width="300" height="70" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="376" y="228" class="m" fill="var(--amber)">dim_product_history</text>
+        <text x="376" y="250" class="s" fill="var(--ink-2)">append-only</text>
+
+        <text x="708" y="24" class="l" fill="var(--ink-3)">Line items, current only</text>
+        <rect x="708" y="80" width="356" height="130" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="724" y="108" class="m" fill="var(--ink)">fact_order_items</text>
+        <text x="724" y="132" class="s" fill="var(--ink-2)">PK order_item_id</text>
+        <text x="724" y="150" class="s" fill="var(--ink-2)">order_status denormalised</text>
+        <text x="724" y="168" class="s" fill="var(--ink-2)">from fact_orders at MERGE</text>
+        <text x="724" y="186" class="s" fill="var(--pine)">STATUS_SYNC_SQL keeps it close</text>
+      </svg>
+      <figcaption>
+        <strong>Q3 does not trust the copy.</strong>
+        The pending-items query joins <code>fact_order_items</code> to
+        <code>fact_orders</code> and filters <code>o.status = 'PENDING'</code>. The
+        denormalised <code>order_status</code> is a write-time convenience; the API
+        uses the orders table as source of truth so a missed sync cannot invent pending
+        quantity.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">07</span>
+      <h2>Four questions, four contracts</h2>
+    </div>
+    <div class="col">
+      <p>
+        The dashboard is four panels, not one mega-query. Each panel has a FastAPI route,
+        a JS contract, and a 10-second poll. Delivery Status is the only panel that hides
+        the loading spinner after the first fetch so the table does not flicker.
+      </p>
+    </div>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr><th>Q</th><th>UI</th><th>Route</th><th>SQL, as coded</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">1</td>
+            <td>Delivery Status</td>
+            <td class="mono">/api/v1/order-delivery-summary</td>
+            <td><code>fact_orders</code> where status not in <code>COMPLETED</code>, grouped by delivery date and status</td>
+          </tr>
+          <tr>
+            <td class="num">2</td>
+            <td>Top Delivery Dates</td>
+            <td class="mono">/api/v1/top-delivery-dates</td>
+            <td>Same open-order filter, grouped by date, <code>ORDER BY open_order_count DESC LIMIT 3</code></td>
+          </tr>
+          <tr>
+            <td class="num">3</td>
+            <td>Pending Items</td>
+            <td class="mono">/api/v1/pending-items-by-product</td>
+            <td>Items joined to orders (<code>PENDING</code>) and <code>dim_product</code>; quantity from <code>_additional_columns.quanity</code> then <code>quantity</code></td>
+          </tr>
+          <tr>
+            <td class="num">4</td>
+            <td>Top Customers</td>
+            <td class="mono">/api/v1/top-customers-pending-orders</td>
+            <td><code>fact_orders</code> joined to <code>dim_customer</code> where status is <code>PENDING</code>, top 3</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note" style="margin-top:18px">
+      <p class="hd">Views are in the PDF, not in the DDL</p>
+      <p>
+        The solution document describes four PostgreSQL views
+        (<code>v_open_orders_by_delivery</code> and siblings) and claims the API contains
+        no raw SQL. <code>initialize_analytics_ddl.sql</code> creates no views.
+        <code>visualization/backend/main.py</code> embeds the four queries. This page
+        follows the running API.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">08</span>
+      <h2>How you start it</h2>
+    </div>
+    <div class="col">
+      <p>
+        From <code>EXECUTION_README.md</code>. Ports that must be free:
+        <code>3000</code>, <code>5432</code>, <code>8001</code>, <code>8083</code>,
+        <code>8087</code>, <code>9094</code>. Spark UI is <code>4040</code>.
+      </p>
+    </div>
+
+<pre><span class="c"># Terminal 1 — repo root. Core stack first so finance-shared-net exists.</span>
+docker compose up -d --build
+docker compose -f docker-compose-spark.yaml up -d --build
+
+<span class="c"># Terminal 2 — dashboard. Postgres must already be on localhost:5432.</span>
+cd visualization
+docker compose up -d --build</pre>
+
+    <div class="col">
+      <p>
+        Stop in reverse: visualization, Spark, core. Full reset adds <code>-v</code> so
+        the Spark checkpoint volume and Postgres data both go. Without that, Spark
+        resumes Kafka offsets and Postgres keeps generated orders.
+      </p>
+      <p>
+        Local <code>spark-submit</code> without Docker is documented in
+        <code>spark-submit.txt</code> and uses Kafka <code>9094</code> plus
+        <code>localhost</code> Postgres. The container CMD uses Spark package
+        <code>spark-sql-kafka-0-10_2.12:3.5.0</code>. <code>main.py</code>’s session
+        builder lists <code>3.5.1</code> — that line only matters for a host-side
+        submit that relies on <code>spark.jars.packages</code>.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">09</span>
+      <h2>Decisions that shaped the code</h2>
+    </div>
+
+    <div class="decisions">
+      <div class="decision">
+        <p class="verdict">Sink</p>
+        <h3>foreachBatch + staging + ON CONFLICT, not a streaming JDBC append</h3>
+        <p>
+          Append would duplicate every update. Spark has no native JDBC upsert.
+          Staging is the batch boundary; MERGE is the idempotent write; history is
+          a second statement on the same snapshot of staging.
+        </p>
+        <p class="alt"><b>Rejected:</b> foreachBatch straight into the target table. Concurrent partitions hung JDBC in local mode — hence <code>coalesce(1)</code>.</p>
+      </div>
+      <div class="decision">
+        <p class="verdict">History</p>
+        <h3>SCD Type 4 instead of Type 2 on the same row</h3>
+        <p>
+          Current queries (Q1–Q4) only need latest state. Lifecycle questions need
+          every CDC event. Two tables keep those access patterns from fighting each
+          other. Order items have no history table; Q3 is a current-state quantity.
+        </p>
+        <p class="alt"><b>Trade-off:</b> history grows with every source update. There is no compaction job in the repo.</p>
+      </div>
+      <div class="decision">
+        <p class="verdict">Deletes</p>
+        <h3>Drop <code>op = d</code>; treat inactivity as <code>is_active</code></h3>
+        <p>
+          The generator toggles <code>is_active</code> with updates. Hard deletes are
+          not part of the simulated workload. <code>is_delete()</code> is unused.
+        </p>
+        <p class="alt"><b>Gap:</b> a real <code>DELETE FROM operations.customers</code> would leave the dim row in place.</p>
+      </div>
+      <div class="decision">
+        <p class="verdict">Drift</p>
+        <h3>Keep unknown payload keys as JSON rather than failing the parse</h3>
+        <p>
+          The <code>quanity</code> typo made this mandatory. New source columns ride
+          along until someone adds them to the Spark schema and DDL.
+        </p>
+        <p class="alt"><b>Not built:</b> the connector image enables Apicurio converters, but the connector JSON uses schema-less JSON converters. There is no registry in the running path.</p>
+      </div>
+      <div class="decision">
+        <p class="verdict">Parallelism</p>
+        <h3><code>local[4]</code>, shuffle 2, one JDBC connection per batch</h3>
+        <p>
+          Four streams need four threads. Default 200 shuffle partitions would spawn
+          empty tasks on tiny micro-batches. Multiple JDBC partitions hung writes
+          during development.
+        </p>
+        <p class="alt"><b>Ceiling:</b> this is a laptop-sized take-home, not a cluster sized to Kafka partitions.</p>
+      </div>
+      <div class="decision">
+        <p class="verdict">Latency</p>
+        <h3>Ten-second trigger, ten-second UI poll</h3>
+        <p>
+          The dashboard cannot be fresher than the sink. Matching the intervals means
+          a poll usually sees the latest completed batch rather than spinning faster
+          than Spark can MERGE.
+        </p>
+      </div>
+      <div class="decision">
+        <p class="verdict">Contracts</p>
+        <h3>Validate API JSON in the browser before drawing a table</h3>
+        <p>
+          Each report module has an <code>isValid…</code> checker. A backend change
+          that drops a field shows as an error state instead of a blank or NaN cell.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">10</span>
+      <h2>Where the code lives</h2>
+    </div>
+
+    <div class="filemap">
+      <div class="frow">
+        <div class="path">implementation/main.py</div>
+        <div class="what"><b>Entry.</b> Schema check, SparkSession, four <code>start_*_stream</code> calls, await, stop.</div>
+      </div>
+      <div class="frow">
+        <div class="path">implementation/config.py</div>
+        <div class="what"><b>Hosts and topics.</b> Env-overridable Kafka/Postgres. Default host port 9094. Trigger 10s. Checkpoint base <code>./checkpoints</code>.</div>
+      </div>
+      <div class="frow">
+        <div class="path">implementation/consumers/*.py</div>
+        <div class="what"><b>The four queries.</b> Envelope parse, foreachBatch, MERGE SQL, optional history and status sync.</div>
+      </div>
+      <div class="frow">
+        <div class="path">implementation/utils/debezium.py</div>
+        <div class="what"><b>Envelope + drift.</b> Dynamic schema wrap, op filter, additional-columns UDF.</div>
+      </div>
+      <div class="frow">
+        <div class="path">implementation/utils/db.py</div>
+        <div class="what"><b>psycopg2.</b> Per-batch connection, MERGE, truncate, startup table existence check (dims, facts, staging — not history).</div>
+      </div>
+      <div class="frow">
+        <div class="path">db-scripts/initialize_db_ddl_new.sql</div>
+        <div class="what"><b>OLTP.</b> Mounted as init script 01. Tables, replica identity, CDC user, slot, publication, generators, cron.</div>
+      </div>
+      <div class="frow">
+        <div class="path">db-scripts/initialize_analytics_ddl.sql</div>
+        <div class="what"><b>Warehouse DDL.</b> Mounted as init script 03. Dims, facts, history, staging.</div>
+      </div>
+      <div class="frow">
+        <div class="path">debezium/connectors/finance-db-connector.json</div>
+        <div class="what"><b>Connector spec.</b> Four-table include list, pgoutput, JSON without embedded schemas.</div>
+      </div>
+      <div class="frow">
+        <div class="path">docker-compose.yaml</div>
+        <div class="what"><b>Core stack.</b> Postgres, ZooKeeper, Kafka, Connect, init, Conduktor. Creates <code>finance-shared-net</code>.</div>
+      </div>
+      <div class="frow">
+        <div class="path">docker-compose-spark.yaml</div>
+        <div class="what"><b>Consumer.</b> External network. Checkpoint and temp volumes. Ports 4040/4041.</div>
+      </div>
+      <div class="frow">
+        <div class="path">visualization/backend/main.py</div>
+        <div class="what"><b>Four GET queries.</b> Inline SQL, CORS open, <code>DATABASE_URL</code> required.</div>
+      </div>
+      <div class="frow">
+        <div class="path">visualization/frontend/src/</div>
+        <div class="what"><b>Dashboard.</b> App shell plus four reports and four contract modules.</div>
+      </div>
+      <div class="frow">
+        <div class="path">implementation/reload/</div>
+        <div class="what"><b>Ops scripts.</b> Documented reset/backfill paths. They import <code>get_db_connection</code>, which is not defined in <code>utils/db.py</code>, and backfill maps sources to <code>public.*</code> rather than <code>operations.*</code>. Treat as scaffolding, not a second pipeline.</div>
+      </div>
+      <div class="frow">
+        <div class="path">EXECUTION_README.md</div>
+        <div class="what"><b>Runbook.</b> Start order, ports, stop order, volume reset.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">11</span>
+      <h2>Limits that are in the code</h2>
+    </div>
+    <div class="col">
+      <ul>
+        <li>Hard deletes never reach the warehouse.</li>
+        <li>Foreign keys were left off analytical facts so CDC can arrive out of parent/child order.</li>
+        <li>Spark-side window dedup is commented out; latest-wins is the SQL <code>DISTINCT ON</code>.</li>
+        <li>Product and customer history insert errors are logged and swallowed; order history errors abort the batch.</li>
+        <li>Startup validation does not require history tables to exist.</li>
+        <li>JDBC session timezone is set to <code>Europe/Kyiv</code> while the database container is <code>TZ=UTC</code>.</li>
+        <li>Serving is a poll, not a push. FastAPI has no WebSocket.</li>
+        <li>The README still points at <code>diagrams/database-diagram.png</code>; that file is not in the tree this page was built from. The ER above is the DDL.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <p style="margin:0 0 .6rem">
+      Drawn from <code>implementation/</code>, <code>db-scripts/</code>,
+      <code>debezium/</code>, compose files, <code>visualization/</code>, and
+      <code>EXECUTION_README.md</code>. Task-provided local credentials stay in those
+      files; they are not repeated here.
+    </p>
+    <p style="margin:0" class="mono">
+      flow.html · ACME analytics pipeline · Spark Structured Streaming take-home
+    </p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById("theme-toggle");
+  var stored = null;
+  try { stored = localStorage.getItem("acme-flow-theme"); } catch (e) {}
+
+  function preferred() {
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark" : "light";
+  }
+  function apply(theme) {
+    root.setAttribute("data-theme", theme);
+    if (btn) btn.textContent = theme === "dark" ? "Light" : "Dark";
+  }
+
+  apply(stored === "dark" || stored === "light" ? stored : preferred());
+
+  if (btn) {
+    btn.addEventListener("click", function () {
+      var next = (root.getAttribute("data-theme") === "dark") ? "light" : "dark";
+      apply(next);
+      try { localStorage.setItem("acme-flow-theme", next); } catch (e) {}
+    });
+  }
+})();
+</script>
+</body>
+</html>

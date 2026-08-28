@@ -1,0 +1,1554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Modelling Agent</title>
+<meta name="description" content="An eight-stage agentic pipeline that reverse-engineers an undocumented Oracle 11g manufacturing database into a governed, gated data model.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=Newsreader:ital,opsz,wght@0,6..72,300..500;1,6..72,300..400&amp;display=swap">
+<style>
+/* ============================================================================
+   Data Modelling Agent — case study
+   Palette: sage-paper ground, green-black ink, deep pine accent.
+   Type: Newsreader (display) / IBM Plex Sans (body) / IBM Plex Mono (data).
+   ========================================================================= */
+
+:root{
+  --ground:#F1F3ED;
+  --surface:#FBFCF9;
+  --surface-2:#E9ECE4;
+  --ink:#141A16;
+  --ink-2:#4C554F;
+  --ink-3:#77807A;
+  --rule:#D6DACE;
+  --rule-strong:#BCC3B6;
+  --accent:#1C5A49;
+  --accent-hi:#2A7A63;
+  --accent-soft:#E0EBE5;
+  --warn:#856409;
+  --warn-soft:#F0E9D4;
+  --stop:#973728;
+  --stop-soft:#F2E1DD;
+  --shadow:0 1px 2px rgba(20,26,22,.05), 0 8px 24px -16px rgba(20,26,22,.35);
+  --maxw:70ch;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E1311;
+    --surface:#151C19;
+    --surface-2:#1B2420;
+    --ink:#E5EAE3;
+    --ink-2:#9CA79F;
+    --ink-3:#78837C;
+    --rule:#28322D;
+    --rule-strong:#3A463F;
+    --accent:#63BB9C;
+    --accent-hi:#84D3B6;
+    --accent-soft:#16302A;
+    --warn:#C9A63B;
+    --warn-soft:#2C2718;
+    --stop:#D9806C;
+    --stop-soft:#33201C;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E1311;
+  --surface:#151C19;
+  --surface-2:#1B2420;
+  --ink:#E5EAE3;
+  --ink-2:#9CA79F;
+  --ink-3:#78837C;
+  --rule:#28322D;
+  --rule-strong:#3A463F;
+  --accent:#63BB9C;
+  --accent-hi:#84D3B6;
+  --accent-soft:#16302A;
+  --warn:#C9A63B;
+  --warn-soft:#2C2718;
+  --stop:#D9806C;
+  --stop-soft:#33201C;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth;}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto;}}
+
+body{
+  margin:0;
+  background:var(--ground);
+  color:var(--ink);
+  font-family:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;
+  font-size:16.5px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* --- layout ------------------------------------------------------------- */
+.wrap{max-width:1200px;margin:0 auto;padding:0 clamp(18px,4vw,48px);}
+.col{max-width:var(--maxw);}
+.rule{border:0;border-top:1px solid var(--rule);margin:0;}
+
+/* --- type --------------------------------------------------------------- */
+h1,h2,h3,h4{font-family:Newsreader,Georgia,"Times New Roman",serif;font-weight:400;text-wrap:balance;margin:0;letter-spacing:-.01em;}
+h1{font-size:clamp(2.6rem,6.4vw,4.6rem);line-height:1.03;letter-spacing:-.024em;}
+h2{font-size:clamp(1.85rem,3.6vw,2.7rem);line-height:1.12;}
+h3{font-size:1.28rem;line-height:1.25;}
+h4{font-size:1.06rem;line-height:1.3;}
+p{margin:0 0 1.05em;}
+p:last-child{margin-bottom:0;}
+a{color:var(--accent);text-underline-offset:.18em;text-decoration-thickness:1px;}
+a:hover{color:var(--accent-hi);}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px;}
+strong{font-weight:600;color:var(--ink);}
+em.note{font-family:Newsreader,Georgia,serif;font-style:italic;color:var(--ink-2);}
+
+.eyebrow{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:.68rem;font-weight:500;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-3);
+}
+.lede{font-size:1.14rem;color:var(--ink-2);max-width:62ch;}
+code,kbd,.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,monospace;font-size:.87em;}
+code{background:var(--surface-2);padding:.1em .34em;border-radius:3px;color:var(--ink);}
+:where(a) code{color:inherit;}
+
+/* --- masthead ----------------------------------------------------------- */
+.mast{padding:clamp(56px,9vh,110px) 0 clamp(40px,6vh,64px);position:relative;overflow:hidden;}
+.mast .wrap{position:relative;z-index:1;}
+.mast-grid{
+  position:absolute;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(var(--rule) 1px,transparent 1px),linear-gradient(90deg,var(--rule) 1px,transparent 1px);
+  background-size:34px 34px;
+  opacity:.45;
+  -webkit-mask-image:radial-gradient(120% 90% at 78% 0%,#000 0%,transparent 72%);
+  mask-image:radial-gradient(120% 90% at 78% 0%,#000 0%,transparent 72%);
+}
+.mast h1{margin:.22em 0 .3em;max-width:16ch;}
+.mast h1 .thin{font-style:italic;font-weight:300;color:var(--accent);}
+.mast .lede{font-size:clamp(1.06rem,2vw,1.28rem);max-width:58ch;}
+.byline{
+  margin-top:2.4rem;display:flex;flex-wrap:wrap;gap:.55rem 1.4rem;
+  font-family:"IBM Plex Mono",monospace;font-size:.76rem;color:var(--ink-3);
+}
+.byline span{display:inline-flex;align-items:center;gap:.45rem;}
+.byline span::before{content:"";width:5px;height:5px;background:var(--accent);border-radius:50%;flex:none;}
+
+/* --- pipeline strip ----------------------------------------------------- */
+.strip{margin-top:3rem;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:1.5rem 0;}
+.strip-track{display:flex;gap:.4rem;overflow-x:auto;padding-bottom:.5rem;scrollbar-width:thin;}
+.stage-chip{
+  flex:1 1 0;min-width:104px;text-decoration:none;color:inherit;
+  border:1px solid var(--rule);border-radius:4px;background:var(--surface);
+  padding:.62rem .7rem .68rem;display:block;position:relative;overflow:hidden;
+  transition:border-color .18s ease, transform .18s ease;
+}
+.stage-chip:hover{border-color:var(--accent);transform:translateY(-2px);}
+.stage-chip .n{font-family:"IBM Plex Mono",monospace;font-size:.7rem;color:var(--accent);font-weight:500;}
+.stage-chip .t{display:block;font-size:.79rem;font-weight:500;line-height:1.25;margin-top:.18rem;color:var(--ink);}
+.stage-chip .m{display:block;font-family:"IBM Plex Mono",monospace;font-size:.68rem;color:var(--ink-3);margin-top:.3rem;}
+.stage-chip::after{
+  content:"";position:absolute;left:0;bottom:0;height:2px;width:100%;
+  background:linear-gradient(90deg,transparent,var(--accent),transparent);
+  transform:translateX(-100%);
+  animation:sweep 9s linear infinite;
+  animation-delay:calc(var(--i) * .38s);
+  opacity:.85;
+}
+@keyframes sweep{
+  0%{transform:translateX(-100%);}
+  12%{transform:translateX(0%);}
+  24%{transform:translateX(100%);}
+  100%{transform:translateX(100%);}
+}
+@media (prefers-reduced-motion: reduce){.stage-chip::after{animation:none;opacity:0;}}
+
+/* --- sections ----------------------------------------------------------- */
+section{padding:clamp(52px,8vh,92px) 0;border-top:1px solid var(--rule);}
+.sec-head{display:grid;grid-template-columns:1fr;gap:.6rem;margin-bottom:2.2rem;max-width:var(--maxw);}
+.sec-head h2{margin-top:.1em;}
+
+/* --- figures ------------------------------------------------------------ */
+figure{margin:2rem 0;padding:0;}
+figure .frame{
+  border:1px solid var(--rule);border-radius:6px;background:var(--surface);
+  padding:clamp(14px,2.5vw,26px);overflow-x:auto;box-shadow:var(--shadow);
+}
+figure svg{display:block;width:100%;height:auto;color:var(--ink);min-width:520px;}
+/* diagram marks: token-driven so both themes resolve, never a baked-in hex */
+.acc-f{fill:var(--accent);}
+.acc-s{stroke:var(--accent);}
+.stop-f{fill:var(--stop);}
+.stop-s{stroke:var(--stop);}
+figcaption{margin-top:.85rem;font-size:.86rem;color:var(--ink-2);max-width:64ch;}
+figcaption b{color:var(--ink);font-weight:600;}
+
+/* --- stage cards -------------------------------------------------------- */
+.stages{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:6px;overflow:hidden;}
+.stage{background:var(--surface);padding:clamp(20px,3vw,32px);}
+.stage-top{display:flex;align-items:baseline;gap:.85rem;flex-wrap:wrap;margin-bottom:.15rem;}
+.stage-no{
+  font-family:"IBM Plex Mono",monospace;font-size:1.5rem;font-weight:500;color:var(--accent);
+  line-height:1;letter-spacing:-.02em;
+}
+.stage h3{flex:1 1 auto;}
+.stage .q{font-family:Newsreader,Georgia,serif;font-style:italic;font-size:1.07rem;color:var(--ink-2);margin:.5rem 0 1.1rem;max-width:60ch;}
+.stage-body{display:grid;grid-template-columns:1fr;gap:1.4rem;}
+@media (min-width:860px){.stage-body{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:2.2rem;}}
+.stage-body>*{min-width:0;}
+.stage-body p{font-size:.95rem;color:var(--ink-2);}
+.stage-body p strong{color:var(--ink);}
+.io{border-left:2px solid var(--accent-soft);padding-left:1.1rem;}
+.io dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:.32rem .9rem;font-size:.83rem;}
+.io dt{font-family:"IBM Plex Mono",monospace;font-size:.7rem;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);padding-top:.16em;}
+.io dd{margin:0;color:var(--ink-2);}
+.io dd .mono{color:var(--ink);font-size:.8rem;}
+
+/* --- metric row --------------------------------------------------------- */
+.metrics{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:1.2rem;}
+.metric{
+  border:1px solid var(--rule);border-radius:4px;background:var(--ground);
+  padding:.45rem .7rem;min-width:76px;
+}
+.metric b{display:block;font-family:"IBM Plex Mono",monospace;font-size:1.02rem;font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums;}
+.metric span{display:block;font-size:.7rem;color:var(--ink-3);letter-spacing:.02em;margin-top:.1rem;}
+
+/* --- badges ------------------------------------------------------------- */
+.badge{
+  display:inline-flex;align-items:center;gap:.38rem;
+  font-family:"IBM Plex Mono",monospace;font-size:.66rem;font-weight:500;letter-spacing:.07em;text-transform:uppercase;
+  padding:.2rem .48rem;border-radius:3px;border:1px solid transparent;white-space:nowrap;
+}
+.badge::before{content:"";width:5px;height:5px;border-radius:1px;background:currentColor;flex:none;}
+.b-ok{color:var(--accent);background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 25%,transparent);}
+.b-warn{color:var(--warn);background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 25%,transparent);}
+.b-stop{color:var(--stop);background:var(--stop-soft);border-color:color-mix(in srgb,var(--stop) 25%,transparent);}
+
+/* --- agent table -------------------------------------------------------- */
+.tablewrap{overflow-x:auto;border:1px solid var(--rule);border-radius:6px;background:var(--surface);box-shadow:var(--shadow);}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:.88rem;}
+caption{text-align:left;font-size:.8rem;color:var(--ink-3);padding:.9rem 1rem .2rem;font-family:"IBM Plex Mono",monospace;}
+th,td{text-align:left;padding:.7rem 1rem;border-bottom:1px solid var(--rule);vertical-align:top;}
+thead th{
+  font-family:"IBM Plex Mono",monospace;font-size:.68rem;font-weight:500;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-3);border-bottom:1px solid var(--rule-strong);white-space:nowrap;
+}
+tbody tr:last-child td{border-bottom:0;}
+tbody tr:hover{background:var(--ground);}
+td.num{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;white-space:nowrap;}
+td .mono{color:var(--accent);}
+
+/* --- trace rail --------------------------------------------------------- */
+.trace{display:grid;gap:0;margin:2rem 0 0;}
+.trace-step{
+  display:grid;grid-template-columns:auto 1fr;gap:0 1.3rem;
+  padding-bottom:1.5rem;position:relative;
+}
+.trace-step:last-child{padding-bottom:0;}
+.trace-mark{
+  grid-row:1 / span 2;width:2.9rem;text-align:right;
+  font-family:"IBM Plex Mono",monospace;font-size:.74rem;color:var(--accent);font-weight:500;
+  position:relative;padding-top:.18rem;
+}
+.trace-mark::after{
+  content:"";position:absolute;right:-.65rem;top:.42rem;bottom:-1.5rem;width:1px;
+  background:var(--rule-strong);transform:translateX(50%);
+}
+.trace-step:last-child .trace-mark::after{display:none;}
+.trace-mark span{
+  position:absolute;right:-.65rem;top:.34rem;width:7px;height:7px;border-radius:50%;
+  background:var(--accent);transform:translateX(50%);box-shadow:0 0 0 3px var(--ground);
+}
+/* without min-width:0 the 1fr track cannot shrink past the pre block's
+   min-content width, and the whole page scrolls sideways on narrow screens */
+.trace-body{min-width:0;}
+.trace-body h4{margin-bottom:.28rem;}
+.trace-body p{font-size:.9rem;color:var(--ink-2);margin-bottom:.5rem;}
+.trace-out{
+  font-family:"IBM Plex Mono",monospace;font-size:.78rem;line-height:1.6;
+  background:var(--surface);border:1px solid var(--rule);border-left:2px solid var(--accent);
+  border-radius:0 4px 4px 0;padding:.6rem .8rem;color:var(--ink-2);overflow-x:auto;white-space:pre;
+}
+.trace-out b{color:var(--ink);font-weight:500;}
+
+/* --- callouts ----------------------------------------------------------- */
+.callout{
+  border:1px solid var(--rule);border-left:3px solid var(--accent);border-radius:0 5px 5px 0;
+  background:var(--surface);padding:1.1rem 1.3rem;margin:1.6rem 0;
+}
+.callout.warn{border-left-color:var(--warn);}
+.callout.stop{border-left-color:var(--stop);}
+.callout h4{margin-bottom:.4rem;font-family:"IBM Plex Sans",sans-serif;font-size:.98rem;font-weight:600;}
+.callout p{font-size:.92rem;color:var(--ink-2);margin-bottom:.6rem;}
+.callout p:last-child{margin-bottom:0;}
+.lesson{
+  font-family:Newsreader,Georgia,serif;font-style:italic;font-size:1.02rem;
+  color:var(--ink);border-top:1px solid var(--rule);padding-top:.7rem;margin-top:.8rem;display:block;
+}
+
+/* --- decision list ------------------------------------------------------ */
+.decisions{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:6px;overflow:hidden;}
+.decision{background:var(--surface);padding:1.3rem clamp(16px,2.4vw,26px);}
+.decision h4{margin-bottom:.35rem;}
+.decision .verdict{font-family:"IBM Plex Mono",monospace;font-size:.72rem;color:var(--ink-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:.5rem;}
+.decision p{font-size:.92rem;color:var(--ink-2);margin-bottom:.55rem;}
+.decision .alt{font-size:.86rem;color:var(--ink-3);border-top:1px dashed var(--rule-strong);padding-top:.55rem;margin-top:.1rem;}
+.decision .alt b{color:var(--ink-2);font-weight:500;}
+
+/* --- scoreboard --------------------------------------------------------- */
+/* cell rules drawn with box-shadow, not a gap-over-background trick — an
+   unfilled track in the last row would otherwise render as a phantom cell */
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(154px,1fr));background:var(--surface);border:1px solid var(--rule);border-radius:6px;overflow:hidden;}
+.cell{padding:1.05rem 1.1rem;box-shadow:1px 0 0 var(--rule),0 1px 0 var(--rule);}
+.cell b{
+  display:block;font-family:"IBM Plex Mono",monospace;font-size:1.5rem;font-weight:500;
+  color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:-.02em;line-height:1.1;
+}
+.cell span{display:block;font-size:.76rem;color:var(--ink-3);margin-top:.32rem;line-height:1.4;}
+.cell.hi b{color:var(--accent);}
+
+/* --- reveal ------------------------------------------------------------- */
+.reveal{opacity:0;transform:translateY(14px);transition:opacity .6s cubic-bezier(.2,.6,.2,1),transform .6s cubic-bezier(.2,.6,.2,1);}
+.reveal.in{opacity:1;transform:none;}
+@media (prefers-reduced-motion: reduce){.reveal{opacity:1;transform:none;transition:none;}}
+
+/* --- footer ------------------------------------------------------------- */
+footer{border-top:1px solid var(--rule);padding:3rem 0 4rem;color:var(--ink-3);font-size:.85rem;}
+footer .wrap{display:flex;flex-wrap:wrap;gap:1.5rem;justify-content:space-between;align-items:flex-start;}
+footer p{max-width:52ch;}
+.tree{
+  font-family:"IBM Plex Mono",monospace;font-size:.76rem;line-height:1.72;color:var(--ink-2);
+  white-space:pre;overflow-x:auto;background:var(--surface);border:1px solid var(--rule);
+  border-radius:6px;padding:1.1rem 1.2rem;
+}
+.tree b{color:var(--accent);font-weight:500;}
+</style>
+</head>
+<body>
+
+<!-- ======================= MASTHEAD ======================= -->
+<header class="mast">
+  <div class="mast-grid" aria-hidden="true"></div>
+  <div class="wrap">
+    <p class="eyebrow">Case study &mdash; agentic data engineering</p>
+    <h1>Reverse-engineering a database <span class="thin">nobody documented</span></h1>
+    <p class="lede">
+      An eight-stage pipeline of Claude Code subagents that turns 345 undocumented Oracle report
+      queries into a governed warehouse model &mdash; profiled, graphed, collapsed, keyed, mapped
+      column-by-column, and shipped as executable SQL. Every stage is checked by a second, adversarial
+      agent before the next one is allowed to start.
+    </p>
+    <div class="byline">
+      <span>Oracle 11g &rarr; S3 / Redshift / Tableau</span>
+      <span>110 Python scripts, 25 shared libraries</span>
+      <span>137 logged design decisions</span>
+      <span>Both validators green</span>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="strip">
+      <p class="eyebrow" style="margin-bottom:.9rem;">The pipeline &mdash; each arrow is a gate</p>
+      <div class="strip-track">
+        <a class="stage-chip" style="--i:0" href="#s00"><span class="n">00</span><span class="t">Requirements</span><span class="m">SOW + 9 BPDs</span></a>
+        <a class="stage-chip" style="--i:1" href="#s01"><span class="n">01</span><span class="t">ISD</span><span class="m">422 profiles</span></a>
+        <a class="stage-chip" style="--i:2" href="#s02"><span class="n">02</span><span class="t">Extended ISD</span><span class="m">820 relations</span></a>
+        <a class="stage-chip" style="--i:3" href="#s03"><span class="n">03</span><span class="t">Entity Graph</span><span class="m">632 / 887</span></a>
+        <a class="stage-chip" style="--i:4" href="#s04"><span class="n">04</span><span class="t">CDM</span><span class="m">303 entities</span></a>
+        <a class="stage-chip" style="--i:5" href="#s05"><span class="n">05</span><span class="t">LDM</span><span class="m">96D / 133F</span></a>
+        <a class="stage-chip" style="--i:6" href="#s06"><span class="n">06</span><span class="t">SMX</span><span class="m">4,543 rows</span></a>
+        <a class="stage-chip" style="--i:7" href="#s07"><span class="n">07</span><span class="t">Data Marts</span><span class="m">47 gold marts</span></a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ======================= 1. THE PROBLEM ======================= -->
+<section id="problem">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">The problem</p>
+      <h2>The schema was never the documentation. The reports were.</h2>
+    </div>
+
+    <div class="col reveal">
+      <p>
+        Interloop is a hosiery manufacturer running a custom Oracle 11g application &mdash; HMS, the
+        Hosiery Management System &mdash; across the full sock lifecycle: order, knitting, toe closing,
+        dye house, boarding, packing, warehouse, shipment. The system works. Nothing about it is
+        written down.
+      </p>
+      <p>
+        There is no ER diagram, no data dictionary, no glossary. Most tables declare no primary key.
+        Most relationships that actually matter are not declared as foreign keys at all &mdash; they
+        exist only as join predicates inside Oracle Reports (RDF) queries. Two schema eras still run
+        side by side: pre-2008 legacy <code>PRD_ORDER_*</code> tables and the post-2008
+        <code>HOMS</code>/<code>SMPL</code> revamp. The business rules &mdash; which status codes
+        count, which rows are excluded, how a quantity is derived &mdash; live inside view DDL and
+        report SQL, not anywhere a modeller can read them.
+      </p>
+      <p>
+        The raw material handed over was <strong>345 consolidated report SQL files</strong> in 15
+        folders, a signed SOW, 11 discovery-session transcripts, 9 business-process design documents,
+        and read access to the production database. The deliverable was a governed model that
+        3&ndash;5 business users could self-serve against in Tableau, on S3 and Redshift.
+      </p>
+      <p>
+        So the pipeline reads the system the way the system actually describes itself: it mines the
+        report SQL for what joins to what, profiles the live catalog for what the data really looks
+        like, and only then decides what the entities are.
+      </p>
+    </div>
+
+    <div class="callout warn reveal">
+      <h4>The folders were not the business</h4>
+      <p>
+        The 15 <code>input/SQL/</code> folder names (<code>fgs</code>, <code>orders</code>,
+        <code>work_order</code>, <code>management</code>&hellip;) are how somebody organised files on
+        the day of handover &mdash; not process boundaries. Reading the 9 BPD documents produced a
+        different, evidence-backed answer: <strong>12 real business processes plus a
+        <code>global</code> shared master-data layer</strong>. <code>orders</code> split into
+        Reservation Orders and Sales Order &amp; Delivery; <code>work_order</code> dissolved across
+        four processes; <code>management</code> turned out to be a cross-stage KPI rollup owning
+        nothing.
+      </p>
+      <p class="lesson">Taking the handover's own filing system as ground truth would have baked somebody's folder habits into the warehouse.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 2. THE MECHANISM ======================= -->
+<section id="gate">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">The mechanism</p>
+      <h2>A second agent that is paid to disagree</h2>
+    </div>
+
+    <div class="col reveal">
+      <p>
+        The pipeline's one non-negotiable rule is that <strong>no stage signs off on its own
+        work</strong>. After a stage agent writes its <code>output/</code>, a separate Feedback Agent
+        runs against that stage's hand-written <code>criteria.md</code> &mdash; and, critically,
+        against the <em>primary sources</em>: the SOW, the raw SQL, the live Oracle catalog. It is
+        explicitly forbidden from grading the draft on the draft's own account of itself.
+      </p>
+      <p>
+        It writes <code>verdict: approved</code> or <code>verdict: rejected</code>. A rejection
+        carries <code>required_fixes</code>, and nothing downstream may route around it.
+      </p>
+    </div>
+
+    <figure class="reveal">
+      <div class="frame">
+        <svg viewBox="0 0 900 330" role="img" aria-label="A phase agent writes output; a feedback agent reads both that output and the primary sources independently, then either approves it forward to the next phase or rejects it back with required fixes.">
+          <defs>
+            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+            </marker>
+            <marker id="ar-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" class="acc-f"/>
+            </marker>
+            <marker id="ar-s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" class="stop-f"/>
+            </marker>
+          </defs>
+
+          <!-- primary sources -->
+          <rect x="300" y="18" width="290" height="46" rx="4" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 3" opacity=".75"/>
+          <text x="445" y="38" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="11.5" fill="currentColor" opacity=".85">PRIMARY SOURCES</text>
+          <text x="445" y="54" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="currentColor" opacity=".6">SOW &#183; raw report SQL &#183; live Oracle catalog</text>
+
+          <!-- row: input -> agent -> output -->
+          <rect x="26" y="132" width="118" height="52" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/>
+          <text x="85" y="155" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="11.5" fill="currentColor">input/</text>
+          <text x="85" y="171" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".6">prior approved</text>
+
+          <line x1="144" y1="158" x2="186" y2="158" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"/>
+
+          <rect x="188" y="124" width="132" height="68" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <text x="254" y="150" text-anchor="middle" font-family="IBM Plex Sans,sans-serif" font-size="13" font-weight="600" fill="currentColor">Phase Agent</text>
+          <text x="254" y="168" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".62">reads PHASE.md</text>
+          <text x="254" y="182" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".62">runs the scripts</text>
+
+          <line x1="320" y1="158" x2="362" y2="158" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"/>
+
+          <rect x="364" y="132" width="118" height="52" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/>
+          <text x="423" y="155" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="11.5" fill="currentColor">output/</text>
+          <text x="423" y="171" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".6">the deliverable</text>
+
+          <line x1="482" y1="158" x2="524" y2="158" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"/>
+
+          <!-- gate -->
+          <polygon points="600,108 692,158 600,208 508,158" fill="none" class="acc-s" stroke-width="1.8"/>
+          <text x="600" y="152" text-anchor="middle" font-family="IBM Plex Sans,sans-serif" font-size="12.5" font-weight="600" class="acc-f">Feedback</text>
+          <text x="600" y="169" text-anchor="middle" font-family="IBM Plex Sans,sans-serif" font-size="12.5" font-weight="600" class="acc-f">Agent</text>
+
+          <!-- independent read -->
+          <line x1="445" y1="64" x2="580" y2="112" stroke="currentColor" stroke-width="1.1" stroke-dasharray="4 3" marker-end="url(#ar)" opacity=".8"/>
+          <text x="434" y="101" text-anchor="end" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".72">re-derives every claim itself</text>
+
+          <!-- approved -->
+          <line x1="692" y1="158" x2="756" y2="158" class="acc-s" stroke-width="1.6" marker-end="url(#ar-a)"/>
+          <text x="724" y="148" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10" class="acc-f">approved</text>
+          <rect x="758" y="132" width="116" height="52" rx="4" fill="none" class="acc-s" stroke-width="1.4"/>
+          <text x="816" y="155" text-anchor="middle" font-family="IBM Plex Sans,sans-serif" font-size="12" font-weight="600" class="acc-f">Next phase</text>
+          <text x="816" y="171" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10" class="acc-f" opacity=".75">treats it as truth</text>
+
+          <!-- rejected loop -->
+          <path d="M600 208 L600 262 L254 262 L254 194" fill="none" class="stop-s" stroke-width="1.5" marker-end="url(#ar-s)"/>
+          <text x="427" y="279" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10.5" class="stop-f">rejected &#8594; required_fixes &#8594; rebuild &amp; resubmit</text>
+
+          <!-- upkeep gate -->
+          <text x="600" y="228" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".62">also checks: context/ memory/ docs/ were updated</text>
+          <text x="26" y="310" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".55">A stage that produced a good deliverable but left the shared context stale is rejected on that basis alone.</text>
+        </svg>
+      </div>
+      <figcaption>
+        <b>The gate.</b> The dashed arrow is what makes it a real review rather than a formality: the
+        Feedback Agent reads the SOW, the raw SQL and the live catalog for itself, so an output cannot
+        pass by being internally consistent. The loop back to the agent is the only path a rejected
+        stage has &mdash; no later stage may route around it.
+      </figcaption>
+    </figure>
+
+    <div class="col reveal">
+      <h3 style="margin-bottom:.6rem;">It caught things, repeatedly</h3>
+      <p>
+        On Phase 00 it independently re-read the SOW and all 11 meeting-note files and confirmed an
+        internal SOW contradiction, an acronym collision, and a mislabeled source file. On Phase 01 it
+        took five rounds: two real gaps &mdash; a classification-bookkeeping defect that silently
+        dropped 10 tables from profiling, then a sibling stale-profile-file gap &mdash; had to be
+        fixed before the final round held. On Phase 02 it found a CTE leak in a regex-fallback path
+        and an alias-resolution blind spot for correlated subqueries. On the LDM it caught a
+        uniqueness check that was <em>vacuously</em> true on a zero-row table.
+      </p>
+    </div>
+
+    <div class="callout reveal">
+      <h4>The gate got finer-grained as the work got finer-grained</h4>
+      <p>
+        Reviewing a whole phase at once stopped being useful once modules were being reworked one at a
+        time. The rule in <code>CLAUDE.md</code> changed to make <strong>any discrete deliverable</strong>
+        gate-worthy: a single module's silver lock, a keys-and-load-strategy pass, one gold mart set.
+        There are <strong>26 approved review files</strong> on disk under
+        <code>pipeline/*/feedback/</code>; several needed a round-1 rejection first (the Toe Closing
+        gold marts were rejected for overclaiming report coverage, Processing twice for stale context
+        files).
+      </p>
+      <p>
+        The whole-phase <code>review.md</code> files for stages 01&ndash;06 are deliberately empty
+        &mdash; explicit, logged skips while per-deliverable review carried the load. That is recorded
+        as a known state, not hidden as a pass.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 3. THE STAGES ======================= -->
+<section id="stages">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Stage by stage</p>
+      <h2>Eight passes, each answering a sharper question about the same data</h2>
+      <p class="lede" style="margin-top:.4rem;">
+        Every folder has the same four pieces: <code>PHASE.md</code> (purpose, inputs, exit criteria),
+        <code>input/</code>, <code>output/</code>, and <code>feedback/</code>. Every number below was
+        re-derived from the artifacts on disk, not copied from the write-ups.
+      </p>
+    </div>
+
+    <div class="stages reveal">
+
+      <!-- 00 -->
+      <article class="stage" id="s00">
+        <div class="stage-top"><span class="stage-no">00</span><h3>Requirements</h3><span class="badge b-ok">approved</span></div>
+        <p class="q">What did the business actually ask for &mdash; and where do the sales documents and the discovery sessions disagree?</p>
+        <div class="stage-body">
+          <div>
+            <p>
+              Reads the SOW, 11 discovery-session transcripts and 9 business-process design documents
+              (all <code>.docx</code>/<code>.pptx</code>, extracted to text first). Produces a kickoff
+              synthesis, a structured gap analysis, and the scoped requirements the whole pipeline is
+              measured against.
+            </p>
+            <p>
+              The gap analysis is the artifact the gate cares about most: <strong>a thin gap analysis
+              on a messy engagement is a red flag, not a pass.</strong> It records what is in the SOW
+              but never discussed, what discovery covered but the SOW never scoped, outright
+              contradictions, and open questions neither source resolves.
+            </p>
+            <p>
+              This stage also derived the <strong>12-process + <code>global</code> taxonomy</strong>
+              from the BPD documents &mdash; overriding the 15 SQL folder names as the process
+              boundary, and forcing a full rebuild of every stage below it.
+            </p>
+          </div>
+          <div class="io">
+            <dl>
+              <dt>In</dt><dd>SOW &#183; 11 meeting notes &#183; 9 BPD business-view documents</dd>
+              <dt>Out</dt><dd><span class="mono">database-understanding-kickoff.md</span>, <span class="mono">gap-analysis.md</span>, <span class="mono">requirements.md</span>, <span class="mono">business-process-taxonomy.json</span></dd>
+              <dt>Gate</dt><dd>Feedback Agent re-read every source file and verified each claimed contradiction against exact source lines</dd>
+            </dl>
+            <div class="metrics">
+              <div class="metric"><b>21</b><span>source docs</span></div>
+              <div class="metric"><b>12+1</b><span>processes derived</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 01 -->
+      <article class="stage" id="s01">
+        <div class="stage-top"><span class="stage-no">01</span><h3>ISD &mdash; Information Source Document</h3><span class="badge b-ok">5-round review</span></div>
+        <p class="q">Which tables really exist, who owns them, and what does the data actually look like?</p>
+        <div class="stage-body">
+          <div>
+            <p>
+              Six mechanical steps, three of them against the live database. Parse all 345 SQL files
+              for table references; resolve every synonym, view and dblink chain through the Oracle
+              catalog; classify each object's role and owning process; reconcile tables claimed by more
+              than one process; then profile keys, columns, nullness and distinct counts per table.
+            </p>
+            <p>
+              The extraction alone needed real judgment. <code>sqlglot</code> correctly parses
+              <code>FROM achieved_parts</code> as a table reference &mdash; but a CTE name is
+              query-local and will never resolve to a catalog object. <strong>74% of the first
+              resolution run came back <code>UNRESOLVED</code></strong> for exactly that reason.
+              Excluding CTE names cut the raw inventory from 2,236 to 685 candidates before a single
+              minute of database time was spent on them.
+            </p>
+            <p>
+              Tables that cannot be confidently assigned an owner are marked
+              <code>ambiguous-needs-review</code> and carried forward flagged &mdash; never silently
+              dropped, never assigned a guessed owner.
+            </p>
+          </div>
+          <div class="io">
+            <dl>
+              <dt>In</dt><dd>345 report SQL files &#183; live Oracle 11g catalog (thick-mode client)</dd>
+              <dt>Out</dt><dd><span class="mono">domain-classification.json</span>, 422 per-table profiles, 81 preserved view DDLs, <span class="mono">cross-domain-map.md</span></dd>
+              <dt>Gate</dt><dd>5 rounds; found a bookkeeping defect that dropped 10 tables from profiling, then a stale sibling artifact</dd>
+            </dl>
+            <div class="metrics">
+              <div class="metric"><b>583</b><span>names classified</span></div>
+              <div class="metric"><b>321</b><span>in CDM scope</span></div>
+              <div class="metric"><b>52</b><span>ambiguous</span></div>
+              <div class="metric"><b>210</b><span>excluded</span></div>
+              <div class="metric"><b>422</b><span>table profiles</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 02 -->
+      <article class="stage" id="s02">
+        <div class="stage-top"><span class="stage-no">02</span><h3>Extended ISD</h3><span class="badge b-ok">2-round review</span></div>
+        <p class="q">What do these tables actually mean to each other, that the catalog never declares?</p>
+        <div class="stage-body">
+          <div>
+            <p>
+              Phase 01 established that most HMS tables declare no PK or FK, and that a declared PK is
+              often a surrogate masking a different true grain. This stage recovers the relational
+              layer from where it really lives: the join predicates in the report SQL, and the business
+              logic embedded in view DDL.
+            </p>
+            <p>
+              <strong>7,834 join predicates</strong> extracted statically produce 820 distinct
+              relationships. Oracle's own declared FK constraints are then reconciled <em>in</em> and
+              given precedence &mdash; a declared constraint outranks a report happening to join two
+              tables. Join-pattern mining alone had missed 185 of 425 in-scope declared FK pairs
+              outright.
+            </p>
+            <p>
+              Grain inference is deliberately cheap: live <code>COUNT(DISTINCT&hellip;)</code>
+              verification is reserved for genuinely ambiguous candidates only. Some of these tables
+              hold 35M+ rows; a blanket sweep across 446 of them would be a production incident, not a
+              profiling pass.
+            </p>
+          </div>
+          <div class="io">
+            <dl>
+              <dt>In</dt><dd>Phase 01 output &#183; the same 345 SQL files &#183; 81 view DDLs</dd>
+              <dt>Out</dt><dd><span class="mono">join-patterns.json</span>, <span class="mono">relationships.json</span>, <span class="mono">grain.json</span>, <span class="mono">business-rules.md</span></dd>
+              <dt>Gate</dt><dd>Round 1 found a CTE leak in the regex fallback path and an alias-resolution gap on correlated subqueries</dd>
+            </dl>
+            <div class="metrics">
+              <div class="metric"><b>7,834</b><span>join predicates</span></div>
+              <div class="metric"><b>820</b><span>relationships</span></div>
+              <div class="metric"><b>424</b><span>declared FK</span></div>
+              <div class="metric"><b>446</b><span>grain calls</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 03 -->
+      <article class="stage" id="s03">
+        <div class="stage-top"><span class="stage-no">03</span><h3>Entity Graph &amp; Schema Modelling</h3><span class="badge b-warn">inserted mid-project</span></div>
+        <p class="q">What does the whole relationship graph look like at once &mdash; and what shape does each cluster naturally have?</p>
+        <div class="stage-body">
+          <div>
+            <p>
+              This stage did not exist originally. It was inserted after the CDM was found to be making
+              structural calls &mdash; which tables collapse into one entity, which are shared &mdash;
+              one business process at a time, without ever seeing the rest of the graph. Every stage
+              below it was renumbered and rebuilt.
+            </p>
+            <p>
+              It assembles <strong>632 nodes and 887 edges</strong>: one node per classified table,
+              plus one for every table reached only via a join or FK and never profiled at all. Those
+              229 unresolved nodes are kept and tagged <code>profiled: false</code> &mdash; dropping
+              them would make the picture look cleaner than the system is.
+            </p>
+            <p>
+              From that graph it decides four things corpus-wide: connected clusters, schema shape
+              (star / snowflake / normalized, ranked by total graph degree rather than declared FK
+              fan-in), structural collapse groups, and reusable/conformed entities. Union candidates
+              get <strong>two independent passes</strong> &mdash; a mechanical column-signature Jaccard
+              check, and an agent-driven semantic pass for tables that mean the same thing under
+              different column names.
+            </p>
+          </div>
+          <div class="io">
+            <dl>
+              <dt>In</dt><dd>Phase 01 classification + profiles &#183; Phase 02 relationships, grain, join patterns</dd>
+              <dt>Out</dt><dd><span class="mono">entity-graph.json</span>, <span class="mono">clusters.json</span>, <span class="mono">schema-shape.json</span>, <span class="mono">collapse-decisions.json</span>, <span class="mono">reusable-entities.json</span>, <span class="mono">union-candidates.json</span>, 18 draw.io diagrams + a self-contained viewer</dd>
+              <dt>Gate</dt><dd>Consumed directly by Phase 04 &mdash; collapse is never recomputed downstream</dd>
+            </dl>
+            <div class="metrics">
+              <div class="metric"><b>632</b><span>nodes</span></div>
+              <div class="metric"><b>887</b><span>edges</span></div>
+              <div class="metric"><b>208</b><span>clusters</span></div>
+              <div class="metric"><b>59</b><span>collapse groups</span></div>
+              <div class="metric"><b>163</b><span>conformed</span></div>
+              <div class="metric"><b>25</b><span>union candidates</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 04 -->
+      <article class="stage" id="s04">
+        <div class="stage-top"><span class="stage-no">04</span><h3>CDM &mdash; Conceptual Data Model</h3><span class="badge b-ok">validator 47/47</span></div>
+        <p class="q">What are the business entities per process, with no physical detail yet?</p>
+        <div class="stage-body">
+          <div>
+            <p>
+              Consumes Phase 03's collapse, conformance and union decisions rather than recomputing
+              them, and turns <strong>387 physical tables into 303 conceptual entities</strong> &mdash;
+              62 of them collapsed from more than one table. 141 are conformed (referenced by two or
+              more processes); 292 carry a grounded business name.
+            </p>
+            <p>
+              One diagram per business process, generated programmatically as draw.io mxGraph XML from
+              structured JSON &mdash; plus a hand-rolled force-directed layout and a dependency-free
+              HTML viewer, because these diagrams describe real client schema and had to stay usable
+              offline.
+            </p>
+            <p>
+              Diagram scope is the interesting constraint. A process's diagram shows only its own
+              entities plus <code>global</code>-owned entities it genuinely connects to. Every other
+              real cross-process edge is recorded in
+              <code>cross-process-relationships.json</code> instead of drawn &mdash; 215 of them
+              &mdash; so the evidence survives without the picture becoming unreadable.
+            </p>
+          </div>
+          <div class="io">
+            <dl>
+              <dt>In</dt><dd>Phase 03 graph &amp; decisions &#183; Phase 02 grain &#183; Phase 01 classification</dd>
+              <dt>Out</dt><dd>13 <span class="mono">&lt;process&gt;-CDM.drawio</span> diagrams, <span class="mono">entities.json</span>, <span class="mono">business-names.json</span>, <span class="mono">cross-process-relationships.json</span>, <span class="mono">viewer.html</span>, notation guide</dd>
+              <dt>Gate</dt><dd><code>validate_cdm.py</code> &mdash; 47 independent checks, all green</dd>
+            </dl>
+            <div class="metrics">
+              <div class="metric"><b>303</b><span>entities</span></div>
+              <div class="metric"><b>387</b><span>physical tables</span></div>
+              <div class="metric"><b>141</b><span>conformed</span></div>
+              <div class="metric"><b>50</b><span>unassigned</span></div>
+              <div class="metric"><b>13</b><span>diagrams</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 05 -->
+      <article class="stage" id="s05">
+        <div class="stage-top"><span class="stage-no">05</span><h3>LDM &mdash; Logical Data Model</h3><span class="badge b-ok">7 modules hand-locked</span></div>
+        <p class="q">What is the keyed, grain-correct dimensional model an ETL build can actually be written from?</p>
+        <div class="stage-body">
+          <div>
+            <p>
+              This is where Hub/Dim/Fact classification, natural vs surrogate keys, SCD strategy and
+              load strategy get decided. It runs from a supplied <code>ldm-builder.md</code> skill plus
+              <strong>eight project override rules</strong> that take precedence wherever the two
+              conflict &mdash; no Hub construct at all, SCD2 with a stored <code>effective_date</code>,
+              CDC-vs-full-load decided by transaction-date presence, and a Fact key built from the
+              actual source PK.
+            </p>
+            <p>
+              Each CDM entity is grain-decomposed: one conceptual entity can legitimately become a Dim
+              plus two Facts if its collapsed tables sit at different grains. Facts that represent the
+              same event across sibling tables are merged into <code>UNION ALL</code> branches &mdash;
+              17 of them &mdash; scored on confidence, with structural vetoes that outrank the score.
+            </p>
+            <p>
+              <strong>The model got smaller as it got better.</strong> The mechanically generated build
+              produced 330 entities. Running each process through a BPD-vs-model lock, an
+              entity-by-entity scorecard and a keys/load pass brought it to <strong>229</strong> &mdash;
+              header/detail pairs correctly folded, out-of-programme tables dropped, billion-row audit
+              logs kept out of silver. Six processes are now hand-authored and locked against
+              regeneration; the other seven stay generator-built, with every borderline call flagged.
+            </p>
+          </div>
+          <div class="io">
+            <dl>
+              <dt>In</dt><dd>Phase 04 entities &#183; Phase 01 column profiles &#183; live DB for uniqueness probes only</dd>
+              <dt>Out</dt><dd>13 <span class="mono">&lt;process&gt;.module.json</span> specs, 13 attributed draw.io diagrams, <span class="mono">classification-review.md</span>, <span class="mono">fact-merge-review.md</span>, <span class="mono">load-order.json</span></dd>
+              <dt>Gate</dt><dd>16 approved per-deliverable reviews across BPD locks, entity reviews, keys passes and FK re-tags</dd>
+            </dl>
+            <div class="metrics">
+              <div class="metric"><b>96</b><span>dimensions</span></div>
+              <div class="metric"><b>133</b><span>facts</span></div>
+              <div class="metric"><b>17</b><span>fact merges</span></div>
+              <div class="metric"><b>152</b><span>source-reused keys</span></div>
+              <div class="metric"><b>93</b><span>CDC loads</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 06 -->
+      <article class="stage" id="s06">
+        <div class="stage-top"><span class="stage-no">06</span><h3>SMX &mdash; Source-to-Model matriX</h3><span class="badge b-ok">0 open items</span></div>
+        <p class="q">Where, physically, does every single column in that model come from?</p>
+        <div class="stage-body">
+          <div>
+            <p>
+              The handoff artifact for the ETL build: one row per destination column, carrying
+              destination schema/table/column, key role, transformation, joining condition, and source
+              column/table/schema. <strong>4,543 rows across 14 workbooks</strong> &mdash; one per
+              business process, plus a shared workbook for the 23 entities used by two or more
+              processes, mapped exactly once.
+            </p>
+            <p>
+              Nothing is allowed to be vague. A merged Fact maps one block per <code>UNION</code>
+              branch, and a column a branch does not have gets an explicit
+              <code>NULL &mdash; column not present in this branch</code> row rather than being omitted
+              &mdash; a missing row and a NULL-by-design row mean very different things to whoever
+              builds the pipeline. An FK promoted from inferred join evidence is labelled
+              <code>[join inferred, high confidence &mdash; verify]</code> so nobody mistakes SQL
+              evidence for a catalog constraint. A source schema with no Bronze mapping is a hard
+              error, not a fallback.
+            </p>
+            <p>
+              Alongside each workbook, <strong>229 executable Spark SQL files</strong> are generated
+              from the same module JSON, so the mapping and the reference implementation cannot drift.
+              Execution order is parsed from the emitted SQL's own <code>FROM</code>/<code>JOIN</code>
+              clauses &mdash; <strong>3 waves, 225 real file dependencies</strong> &mdash; rather than
+              from the model's 516 FK edges, because most FKs are raw-value copies that read nothing at
+              runtime. The model graph is denser than the dependency graph, and running against the
+              wrong one would serialise work that could run in parallel.
+            </p>
+          </div>
+          <div class="io">
+            <dl>
+              <dt>In</dt><dd>Phase 05 <span class="mono">*.module.json</span> (globbed, never hardcoded)</dd>
+              <dt>Out</dt><dd>14 <span class="mono">_smx.xlsx</span> workbooks + parallel <span class="mono">_rows.json</span> and <span class="mono">.md</span>, 229 <span class="mono">.sql</span> files, <span class="mono">EXECUTION-ORDER.md</span></dd>
+              <dt>Gate</dt><dd><code>validate_dimensional_ldm_smx.py</code> &mdash; 70 checks over the LDM, the SMX and the generated SQL, all green</dd>
+            </dl>
+            <div class="metrics">
+              <div class="metric"><b>4,543</b><span>mapping rows</span></div>
+              <div class="metric"><b>14</b><span>workbooks</span></div>
+              <div class="metric"><b>229</b><span>SQL files</span></div>
+              <div class="metric"><b>0</b><span>open items</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 07 -->
+      <article class="stage" id="s07">
+        <div class="stage-top"><span class="stage-no">07</span><h3>Data Marts &mdash; Gold</h3><span class="badge b-ok">7 mart sets approved</span></div>
+        <p class="q">What does a business user actually query, and does it cover the reports they have today?</p>
+        <div class="stage-body">
+          <div>
+            <p>
+              Silver is grain-correct and normalized; it is not what a Tableau user should join by
+              hand. Gold is a small set of wide, self-service marts per process &mdash;
+              <strong>47 mart SQL files across 11 process folders</strong> &mdash; each with an explicit grain,
+              a data dictionary, and a client-facing Excel workbook generated from the same source.
+            </p>
+            <p>
+              The discipline here is coverage honesty. Every legacy Oracle report is tracked in
+              <code>REPORT-COVERAGE.md</code> as Covered, Partial or Gap &mdash; and a report is only
+              flipped to Covered when the mart genuinely carries the formula at the right grain. One
+              knitting on-time-delivery report was moved <em>back</em> to Partial after the user pointed
+              out the mart and the original RDF sit at different grains. Claiming coverage that a grain
+              mismatch quietly breaks is worse than admitting a gap.
+            </p>
+          </div>
+          <div class="io">
+            <dl>
+              <dt>In</dt><dd>Phase 06 silver SQL &#183; the original RDF report inventory per process</dd>
+              <dt>Out</dt><dd>47 <span class="mono">mart_*.sql</span>, 11 client Excel dictionaries, <span class="mono">DATA-MART-DESIGN.md</span>, <span class="mono">REPORT-COVERAGE.md</span></dd>
+              <dt>Gate</dt><dd>7 approved gold reviews (Toe Closing, Processing, Finishing, FGS, Waste, Packaging, YMR) &mdash; several after a round-1 rejection for overclaiming coverage</dd>
+            </dl>
+            <div class="metrics">
+              <div class="metric"><b>47</b><span>gold marts</span></div>
+              <div class="metric"><b>11</b><span>process folders</span></div>
+              <div class="metric"><b>11</b><span>Excel dictionaries</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 4. AGENTS ======================= -->
+<section id="agents">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">The roster</p>
+      <h2>Nine agent definitions, each scoped so it cannot wander</h2>
+      <p class="lede" style="margin-top:.4rem;">
+        Each lives in <code>.claude/agents/</code> as a persona with its own tool allowlist, its own
+        inputs, and &mdash; deliberately &mdash; its own list of things it must <em>not</em> do.
+      </p>
+    </div>
+
+    <div class="tablewrap reveal">
+      <table>
+        <caption>.claude/agents/ &mdash; one persona per stage, plus the gate</caption>
+        <thead>
+          <tr><th>Agent</th><th>Owns</th><th>The constraint that matters</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="mono">requirements-agent</span></td>
+            <td>Stage 00</td>
+            <td>Works only from engagement documents &mdash; never touches source data or schemas.</td>
+          </tr>
+          <tr>
+            <td><span class="mono">isd-agent</span></td>
+            <td>Stage 01</td>
+            <td>Resolves views and synonyms to real base tables before classifying anything; a name that looks like a table may be a CTE.</td>
+          </tr>
+          <tr>
+            <td><span class="mono">extended-isd-agent</span></td>
+            <td>Stage 02</td>
+            <td>Never modifies Phase 01's profiles &mdash; every deliverable is a new artifact. Phase 01's open items stay open by design.</td>
+          </tr>
+          <tr>
+            <td><span class="mono">graph-model-agent</span></td>
+            <td>Stage 03</td>
+            <td>Never drops a node reached only via FK or join. Classifies shape from evidence, and flags rather than guesses where evidence is thin.</td>
+          </tr>
+          <tr>
+            <td><span class="mono">cdm-agent</span></td>
+            <td>Stage 04</td>
+            <td>Consumes Phase 03's collapse decisions; never recomputes them. A shared entity is owned by exactly one diagram.</td>
+          </tr>
+          <tr>
+            <td><span class="mono">dimensional-ldm-agent</span></td>
+            <td>Stage 05 (dimensional)</td>
+            <td>Follows the supplied skill except where the 8 project overrides conflict &mdash; then the overrides win. Treats every count in its own spec as a claim to verify against the artifacts.</td>
+          </tr>
+          <tr>
+            <td><span class="mono">ldm-agent</span></td>
+            <td>Stage 05 (relational)</td>
+            <td>A second, parallel, non-dimensional track kept deliberately separate. Explicitly <em>not</em> the track that feeds SMX &mdash; the two must never be pointed at each other's inputs.</td>
+          </tr>
+          <tr>
+            <td><span class="mono">smx-agent</span></td>
+            <td>Stage 06</td>
+            <td>Adapted from a Hub-based skill for a model with no Hub construct. Refuses entity-level work with no source lineage &mdash; that belongs upstream.</td>
+          </tr>
+          <tr>
+            <td><span class="mono">feedback-agent</span></td>
+            <td>Every stage</td>
+            <td>Reads primary sources, never the draft's account of itself. &ldquo;A suspiciously clean result is itself a finding.&rdquo;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col reveal" style="margin-top:2rem;">
+      <p>
+        Two of the persona files are worth calling out for what they warn about rather than what they
+        instruct. <code>dimensional-ldm-agent.md</code> tells its own reader that <em>every count in
+        this file is indicative only</em> &mdash; derive the real figure from the artifacts, because a
+        number written into a spec reads as an assertion, and stale ones have already sent verification
+        down the wrong path here. And both LDM personas open by warning that a second, similarly-named
+        track exists and must not be confused with theirs.
+      </p>
+      <p>
+        Alongside the personas sit the <strong>global rules in <code>CLAUDE.md</code></strong> that
+        every session inherits: always use the project virtualenv, always redirect script output to
+        <code>logs/</code> with <code>2&gt;&amp;1</code> (progress bars write to stderr, and a crashed
+        long-running job once lost its whole run's output), and never mark a task complete without
+        either an approved verdict or an explicitly logged decision to skip review.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 5. WORKED EXAMPLE ======================= -->
+<section id="example">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Worked example</p>
+      <h2>One table, all the way through</h2>
+      <p class="lede" style="margin-top:.4rem;">
+        <code>PRD.PRD_BATCH_OPER</code> &mdash; 23.8 million rows recording every stitching operation
+        posted on a production batch. Here is exactly what each stage did to it, taken from the
+        artifacts on disk.
+      </p>
+    </div>
+
+    <figure class="reveal">
+      <div class="frame">
+        <svg viewBox="0 0 1000 360" role="img" aria-label="Three physical Oracle tables collapse into one conceptual entity called Batch at the CDM stage, then decompose into one dimension and two facts at their correct grains in the LDM stage.">
+          <defs>
+            <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+            </marker>
+            <marker id="ar2a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" class="acc-f"/>
+            </marker>
+          </defs>
+
+          <!-- column headers -->
+          <text x="16" y="24" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="currentColor" opacity=".6">PHASE 01 &#8212; PHYSICAL</text>
+          <text x="352" y="24" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="currentColor" opacity=".6">PHASE 03/04 &#8212; CONCEPTUAL</text>
+          <text x="646" y="24" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="currentColor" opacity=".6">PHASE 05 &#8212; LOGICAL</text>
+          <line x1="16" y1="34" x2="984" y2="34" stroke="currentColor" stroke-width="1" opacity=".22"/>
+
+          <!-- physical tables -->
+          <rect x="16" y="62" width="230" height="52" rx="4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="30" y="82" font-family="IBM Plex Mono,monospace" font-size="11.5" fill="currentColor">PRD_BATCH_MST</text>
+          <text x="30" y="99" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".62">14,675,233 rows &#183; composite PK</text>
+
+          <rect x="16" y="132" width="230" height="52" rx="4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="30" y="152" font-family="IBM Plex Mono,monospace" font-size="11.5" fill="currentColor">PRD_BATCH_DTL</text>
+          <text x="30" y="169" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".62">pair lines &#183; PK TRANDTL_PK</text>
+
+          <rect x="16" y="202" width="230" height="52" rx="4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="30" y="222" font-family="IBM Plex Mono,monospace" font-size="11.5" fill="currentColor">PRD_BATCH_OPER</text>
+          <text x="30" y="239" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".62">23,829,720 rows &#183; PK TRANMST_PK</text>
+
+          <!-- collapse arrows -->
+          <path d="M246 88 C296 88 296 158 340 158" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar2)"/>
+          <path d="M246 158 L338 158" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar2)"/>
+          <path d="M246 228 C296 228 296 158 340 158" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar2)"/>
+          <text x="252" y="288" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".7">collapse:</text>
+          <text x="252" y="302" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".7">shared name family</text>
+          <text x="252" y="316" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".7">+ join on parent PK</text>
+          <text x="252" y="330" font-family="IBM Plex Mono,monospace" font-size="10" fill="currentColor" opacity=".7">+ same owning process</text>
+
+          <!-- CDM entity -->
+          <rect x="342" y="120" width="196" height="76" rx="4" fill="none" class="acc-s" stroke-width="2"/>
+          <text x="440" y="148" text-anchor="middle" font-family="IBM Plex Sans,sans-serif" font-size="14" font-weight="600" class="acc-f">Batch</text>
+          <text x="440" y="166" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10" class="acc-f" opacity=".85">1 conceptual entity</text>
+          <text x="440" y="182" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10" class="acc-f" opacity=".85">conformed &#183; used by 10 processes</text>
+
+          <!-- decompose arrows -->
+          <path d="M538 158 C588 158 588 88 634 88" fill="none" class="acc-s" stroke-width="1.3" marker-end="url(#ar2a)"/>
+          <path d="M538 158 L632 158" fill="none" class="acc-s" stroke-width="1.3" marker-end="url(#ar2a)"/>
+          <path d="M538 158 C588 158 588 228 634 228" fill="none" class="acc-s" stroke-width="1.3" marker-end="url(#ar2a)"/>
+          <text x="546" y="288" font-family="IBM Plex Mono,monospace" font-size="10" class="acc-f" opacity=".9">grain decomposition:</text>
+          <text x="546" y="302" font-family="IBM Plex Mono,monospace" font-size="10" class="acc-f" opacity=".9">one entity, three grains,</text>
+          <text x="546" y="316" font-family="IBM Plex Mono,monospace" font-size="10" class="acc-f" opacity=".9">so three constructs</text>
+
+          <!-- LDM constructs -->
+          <rect x="636" y="62" width="344" height="52" rx="4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="650" y="82" font-family="IBM Plex Mono,monospace" font-size="11.5" fill="currentColor">Dim_Batch</text>
+          <text x="650" y="99" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="currentColor" opacity=".62">SCD2 &#183; surrogate over composite NK &#183; CDC on BATCH_DATE</text>
+
+          <rect x="636" y="132" width="344" height="52" rx="4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="650" y="152" font-family="IBM Plex Mono,monospace" font-size="11.5" fill="currentColor">Fact_Batch_Pair</text>
+          <text x="650" y="169" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="currentColor" opacity=".62">one pair line per batch</text>
+
+          <rect x="636" y="202" width="344" height="52" rx="4" fill="none" class="acc-s" stroke-width="1.8"/>
+          <text x="650" y="222" font-family="IBM Plex Mono,monospace" font-size="11.5" class="acc-f">Fact_Tc_Production</text>
+          <text x="650" y="239" font-family="IBM Plex Mono,monospace" font-size="9.5" class="acc-f" opacity=".8">one stitch posting &#183; key TRANMST_PK &#183; CDC on STITCH_DATE</text>
+        </svg>
+      </div>
+      <figcaption>
+        <b>Collapse, then decompose &mdash; not a contradiction.</b> Stage 03 folds three tables into
+        one entity because a business person calls all of it &ldquo;the batch&rdquo;; the conceptual
+        model should not expose a header/detail split. Stage 05 then splits it back apart, because a
+        dimension and a 23.8M-row event log cannot share a grain. Each stage optimises for a different
+        correctness property, and the entity register carries both views.
+      </figcaption>
+    </figure>
+
+    <div class="trace reveal">
+
+      <div class="trace-step">
+        <div class="trace-mark">01<span></span></div>
+        <div class="trace-body">
+          <h4>Profiled against the live catalog</h4>
+          <p>
+            Classified <code>core-transactional</code>, owned by <code>toe_closing</code>, referenced
+            by two modules. Row count, declared PK, two declared FKs, and per-column distinct/null
+            counts pulled from optimizer statistics.
+          </p>
+          <div class="trace-out">role          core-transactional
+rows          23,829,720
+PK            TRANMST_PK
+FK            BATCHDTL_TRANDTLPK_FK &#8594; PRD_BATCH_DTL.TRANDTL_PK
+FK            OPN_ID                &#8594; PRD_TC_OPERATIONS.OPN_ID
+<b>OPN_ID</b>        7 distinct, <b>19,610,180 nulls</b>  &#8592; 82% of rows</div>
+        </div>
+      </div>
+
+      <div class="trace-step">
+        <div class="trace-mark">02<span></span></div>
+        <div class="trace-body">
+          <h4>Grain challenged, relationships mined</h4>
+          <p>
+            The declared PK was assessed as a <em>possible surrogate</em>: join-pattern evidence showed
+            a different column carrying the practical grain. The stage flagged it rather than deciding
+            &mdash; including the fact that its own candidate is nullable, which is unusual for a real
+            key.
+          </p>
+          <div class="trace-out">declared_pk_assessment   possible-surrogate
+inferred_grain           [BATCHDTL_TRANDTLPK_FK]   8 join contexts / 8 files
+confidence               low
+caution                  inferred grain column is nullable &#8212; needs review
+relationships found      9  (2 declared, 7 inferred from report SQL)</div>
+        </div>
+      </div>
+
+      <div class="trace-step">
+        <div class="trace-mark">03<span></span></div>
+        <div class="trace-body">
+          <h4>Placed in the graph, proposed for collapse</h4>
+          <p>
+            One node among 632. The collapse proposer grouped it with its two siblings on the
+            three-signal bar &mdash; a join onto the parent's PK, a shared name family with an
+            identifiable header, and the same owning process.
+          </p>
+          <div class="trace-out">representative      PRD.PRD_BATCH_MST
+member_tables       PRD_BATCH_MST, PRD_BATCH_DTL, PRD_BATCH_OPER
+evidence            inferred-join-on-parent-pk (both children)
+representative_grain  confirmed-business-key &#183; high confidence</div>
+        </div>
+      </div>
+
+      <div class="trace-step">
+        <div class="trace-mark">04<span></span></div>
+        <div class="trace-body">
+          <h4>Became one named, conformed entity</h4>
+          <p>
+            Business name applied, conformance computed mechanically from the graph rather than
+            asserted. Ten processes reference it, so it is drawn once in Toe Closing and imported
+            everywhere else that genuinely connects to it.
+          </p>
+          <div class="trace-out">business_name       "Batch"
+owning_domain       toe_closing
+conformed           true
+domains_using_it    10 processes
+union_candidates    1 semantic group (high confidence)</div>
+        </div>
+      </div>
+
+      <div class="trace-step">
+        <div class="trace-mark">05<span></span></div>
+        <div class="trace-body">
+          <h4>Decomposed &mdash; and the grain question finally answered</h4>
+          <p>
+            A live profiling run (<code>profile_tc_fact_keys.py</code>) confirmed the real keys, and a
+            human lock recorded the finding that <code>OPN_ID</code> is a <em>factory stage</em>, not a
+            stitch type as previously assumed. The Fact key reuses the true source PK rather than an
+            opaque counter, so every row stays traceable to Oracle.
+          </p>
+          <div class="trace-out">Fact_Tc_Production
+  business_name   Toe-Closing Stitch Production
+  grain           one stitch posting (TRANMST_PK)
+  key             tc_production_fact_key &#8212; <b>source-reused</b> from TRANMST_PK
+  load            cdc on STITCH_DATE
+  note            OPN_ID null on ~82% of rows &#8212; recorded, not silently joined</div>
+        </div>
+      </div>
+
+      <div class="trace-step">
+        <div class="trace-mark">06<span></span></div>
+        <div class="trace-body">
+          <h4>Mapped column by column, then generated as SQL</h4>
+          <p>
+            34 SMX rows for this Fact alone. Every FK states its full join predicate; an inferred join
+            is labelled as inferred; a lookup against a surrogate-keyed dimension carries the
+            reconstruction of the composite natural key.
+          </p>
+          <div class="trace-out">DEST COLUMN              KEY  TRANSFORMATION                             SOURCE
+tc_production_fact_key   PK   1:1 raw copy                               PRD_BATCH_OPER.TRANMST_PK
+tc_operations_dim_key    FK   1:1 raw copy                               PRD_BATCH_OPER.OPN_ID
+pair_desc_fact_key       FK   1:1 raw copy <b>[inferred join, high &#8212; verify]</b>  PRD_BATCH_OPER.PAIRDESC_TRANDTLPK_FK
+batch_dim_key            FK   <b>Lookup Dim_Batch on BATCH_NO, YEAR_CODE, SLAV</b>  Dim_Batch (silver)
+date_dim_key             FK   Lookup Dim_Date on FULL_DATE               Dim_Date (silver)</div>
+        </div>
+      </div>
+
+      <div class="trace-step">
+        <div class="trace-mark">07<span></span></div>
+        <div class="trace-body">
+          <h4>Surfaced as a gold mart a business user can query</h4>
+          <p>
+            <code>mart_tc_production</code> unions stitch and trim postings into one production row,
+            enriched with the product spine, cost-centre and employee labels, and derived measures.
+            Its header states exactly what stays Partial &mdash; attendance tiers and the SAM incentive
+            calc &mdash; and why.
+          </p>
+          <div class="trace-out">grain     one stitch OR trim posting (Production_Type = STITCH | TRIM)
+silver    Fact_Tc_Production + Fact_Trim_Production
+derived   Qty_Total_Pcs = Dozens*24 + Pcs ; Line_Amount = Qty_Dozens * Rate
+partial   attendance CF tiers, SAM/efficiency incentive &#8212; stated, not hidden</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 6. DECISIONS ======================= -->
+<section id="decisions">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Judgment calls</p>
+      <h2>Six decisions that shaped the model</h2>
+      <p class="lede" style="margin-top:.4rem;">
+        137 are logged in <code>memory/decisions.md</code>, each with the alternative that lost and why.
+        These six changed the shape of the output rather than a detail of it.
+      </p>
+    </div>
+
+    <div class="decisions reveal">
+
+      <div class="decision">
+        <h4>Collapse on structural facts, never on a heuristic label</h4>
+        <p class="verdict">Rule &#183; Phase 03</p>
+        <p>
+          The original collapse rule required a candidate parent to carry a <code>core-transactional</code>
+          role &mdash; the pipeline's own guess about the table. It was replaced by a name-family test:
+          a shared leading token stem, an identifiable header in the family, and a child that does not
+          head its own sub-family. Table names and declared FKs are hard evidence; a role label is this
+          pipeline's inference about them.
+        </p>
+        <p class="alt"><b>Rejected:</b> keeping the role filter and patching the cases it got wrong &mdash; it had already inverted 7 of 47 groups (see below).</p>
+      </div>
+
+      <div class="decision">
+        <h4>Only a Fact ever holds a key &mdash; a Dim holds none, not even another Dim's</h4>
+        <p class="verdict">Override &#183; supersedes the base skill</p>
+        <p>
+          Enforced in two passes. A Dim found holding a <em>Fact</em> key is reclassified as a Fact
+          &mdash; its identity depends on a transaction, which makes it a child of that transaction. A
+          Dim holding another <em>Dim's</em> key has that key demoted to a denormalised plain attribute:
+          the parent's value, not a joinable reference. Dimensions meet only at the Fact.
+        </p>
+        <p class="alt"><b>Rejected:</b> the supplied skill's own rule 4, which permitted a Dim to carry another Dim's key plus its name and description.</p>
+      </div>
+
+      <div class="decision">
+        <h4>A cross-process edge is recorded, not drawn</h4>
+        <p class="verdict">Scope correction &#183; Phase 04 &amp; 05</p>
+        <p>
+          The original rule &mdash; any real edge pulls the other side onto the diagram as a placeholder
+          &mdash; let corpus-wide hub tables drag unrelated processes onto diagrams that had nothing to
+          do with them. It surfaced from a single user observation: a production-planning trial-run table
+          appearing on the orders diagram off a three-occurrence FK. Now a diagram shows only its own
+          entities plus <code>global</code> ones it genuinely touches; all 215 other real edges go to a
+          report file.
+        </p>
+        <p class="alt"><b>Rejected:</b> deleting the edges, which would have lost real evidence to make a picture tidier.</p>
+      </div>
+
+      <div class="decision">
+        <h4>Hand-author the modules that matter; generate the rest and say so</h4>
+        <p class="verdict">Process &#183; Phase 05</p>
+        <p>
+          Six processes &mdash; Toe Closing, Processing, Finishing, FGS, Waste, Packaging &mdash; were
+          rebuilt entity-by-entity against their BPD document, with live grain probes and a scorecard
+          per entity, then locked so the mechanical generator cannot overwrite them. The remaining
+          seven stay generator-built, with every borderline Dim-vs-Fact call listed in
+          <code>classification-review.md</code>, sorted least-confident first.
+        </p>
+        <p class="alt"><b>Rejected:</b> presenting the heuristic output as final. The user's objection &mdash; &ldquo;heuristic silver is not final&rdquo; &mdash; is what started the entity-review cycle.</p>
+      </div>
+
+      <div class="decision">
+        <h4>Include the ambiguous, flag it, never guess an owner</h4>
+        <p class="verdict">Standing rule &#183; every phase</p>
+        <p>
+          52 tables could not be assigned an owning process from the evidence available. They stay in
+          the graph and, collapsing to 50 entities, in the entity roster &mdash; flagged
+          <code>contains_ambiguous_table</code> with a null owning domain, and therefore modelled in no
+          per-process LDM module rather than forced into a guessed one. An FK
+          pointing at one of them resolves as <code>unresolved: true</code> with the raw ID carried
+          through, never as a fabricated join.
+        </p>
+        <p class="alt"><b>Rejected:</b> dropping them (loses real tables) or assigning a best-guess owner (fabricates a fact the diagram then presents as settled).</p>
+      </div>
+
+      <div class="decision">
+        <h4>Two passes for union candidates, because one is structurally blind</h4>
+        <p class="verdict">Method &#183; Phase 03</p>
+        <p>
+          The mechanical pass compares column signatures by Jaccard overlap and requires provable absence
+          of any edge between members &mdash; it finds the same entity split by year or plant. It cannot
+          see that <code>AUTH_DATE</code> and <code>BLOAD_DATE</code> mean the same thing across two
+          tables with 0% name overlap. So a second, agent-driven semantic pass runs over a mechanical
+          worklist, and every claim must cite a specific column correspondence.
+        </p>
+        <p class="alt"><b>Rejected:</b> lowering the Jaccard threshold, which produces noise rather than the missing class of match.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 7. FAILURES ======================= -->
+<section id="failures">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Failure journal</p>
+      <h2>What broke, and what it changed</h2>
+      <p class="lede" style="margin-top:.4rem;">
+        Every mistake is written up in <code>memory/failure-journal.md</code> with how it was found and
+        how it was fixed &mdash; so the same class of bug is not re-derived in a later stage. Four of
+        the most expensive.
+      </p>
+    </div>
+
+    <div class="callout stop reveal">
+      <h4>A 10-row lookup swallowed a 15.8-million-row transaction table</h4>
+      <p>
+        The collapse rule filtered candidate parents by role <em>before</em> testing &ldquo;exactly one
+        qualifying parent.&rdquo; When a detail table's real header happened to be tagged
+        <code>shared-reference</code>, the filter did not skip that candidate &mdash; it removed the
+        right answer from the candidate set, leaving an unrelated small lookup as the sole survivor,
+        which then passed the uniqueness test as unambiguous. <strong>7 of 47 entities came out
+        inverted.</strong>
+      </p>
+      <p>
+        Nothing caught it because every build step verified its own contract and all of them passed:
+        all 392 tables covered exactly once, every entity modelled, counts reconciling. Nothing asserted
+        that a group's members <em>are the same business object</em> &mdash; that was assumed, not
+        checked. It surfaced four stages downstream as four unrelated-looking symptoms.
+      </p>
+      <p class="lesson">A filter that runs before an ambiguity test does not reduce the candidate set &mdash; it rewrites the answer.</p>
+    </div>
+
+    <div class="callout stop reveal">
+      <h4>The validator that should have caught it was a zero-byte file</h4>
+      <p>
+        <code>validate_cdm.py</code> was listed as a runbook step. It was empty. It exited 0 and printed
+        nothing, which reads exactly like success. It is now 47 real checks &mdash; and it deliberately
+        re-implements the name-token split in five lines rather than importing the library it validates,
+        so a bug in the tokenizer cannot validate itself.
+      </p>
+      <p class="lesson">Write the validator for the assertion you are <em>assuming</em>, not the one you are computing. An empty validator is worse than no validator.</p>
+    </div>
+
+    <div class="callout warn reveal">
+      <h4>A uniqueness check that was true because the table was empty</h4>
+      <p>
+        Cardinality resolution compared <code>COUNT(*)</code> to <code>COUNT(DISTINCT &hellip;)</code>
+        per side with no lower bound. <code>WMS.CRTSTATUS</code> has zero rows, so
+        <code>0 == 0</code> held for <em>any</em> column asked of it &mdash; silently promoting 3 pairs
+        to <code>1:1 (confirmed)</code> on no evidence whatsoever. The Feedback Agent caught it by
+        treating a clean result as something to interrogate, then confirmed the empty table live.
+      </p>
+      <p class="lesson">Any &ldquo;for all X, P(X)&rdquo; check needs an explicit empty-set case, or it passes vacuously and looks confident doing it.</p>
+    </div>
+
+    <div class="callout warn reveal">
+      <h4>Several FKs pointing at one parent were ANDed into a join that could never match</h4>
+      <p>
+        A composite-FK grouper treated <em>any</em> two FK entries pointing at the same target as one
+        composite key and ANDed their columns into a single predicate &mdash; breaking role-playing
+        dimensions, where a locator dimension is legitimately referenced three times (bin, from-bin,
+        to-bin) by three separate FKs. 12 entity/target pairs across 8 modules. The mechanical validator
+        had nothing to say about it: the SQL was syntactically valid and simply wrong.
+      </p>
+      <p class="lesson">It was found by grepping the model for the general <em>shape</em> of a bug the agent persona named one specific instance of &mdash; not by trusting the validator.</p>
+    </div>
+
+    <div class="col reveal" style="margin-top:2.2rem;">
+      <p>
+        The pattern across all four is the same, and it is the reason the gate exists at all:
+        <strong>every build script verifies its own step, so none of them can see a defect that only
+        appears once the steps are composed.</strong> Both cross-phase validators &mdash;
+        <code>validate_cdm.py</code> and <code>validate_dimensional_ldm_smx.py</code> &mdash; read only
+        the final artifacts and know nothing about how they were produced, precisely so they can.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 8. SCOREBOARD ======================= -->
+<section id="numbers">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Where it stands</p>
+      <h2>Verified against the artifacts, not the write-ups</h2>
+      <p class="lede" style="margin-top:.4rem;">
+        Every figure below was re-derived from the JSON, the workbooks and the SQL on disk while writing
+        this page &mdash; because the write-ups themselves carry several generations of superseded
+        numbers, and the project's own rule is to trust the artifact over the prose.
+      </p>
+    </div>
+
+    <div class="board reveal">
+      <div class="cell"><b>345</b><span>source report SQL files</span></div>
+      <div class="cell"><b>583</b><span>catalog names classified</span></div>
+      <div class="cell"><b>422</b><span>tables profiled</span></div>
+      <div class="cell"><b>81</b><span>view DDLs decoded</span></div>
+      <div class="cell"><b>7,834</b><span>join predicates mined</span></div>
+      <div class="cell"><b>820</b><span>relationships resolved</span></div>
+      <div class="cell hi"><b>632</b><span>graph nodes</span></div>
+      <div class="cell hi"><b>887</b><span>graph edges</span></div>
+      <div class="cell"><b>303</b><span>CDM entities</span></div>
+      <div class="cell"><b>13</b><span>CDM diagrams</span></div>
+      <div class="cell"><b>96</b><span>dimensions</span></div>
+      <div class="cell"><b>133</b><span>facts</span></div>
+      <div class="cell hi"><b>4,543</b><span>SMX mapping rows</span></div>
+      <div class="cell"><b>0</b><span>open items</span></div>
+      <div class="cell"><b>229</b><span>generated SQL files</span></div>
+      <div class="cell"><b>47</b><span>gold marts</span></div>
+      <div class="cell"><b>135</b><span>Python modules</span></div>
+      <div class="cell"><b>137</b><span>logged decisions</span></div>
+      <div class="cell hi"><b>26</b><span>approved reviews</span></div>
+      <div class="cell hi"><b>117</b><span>validator checks green</span></div>
+    </div>
+
+    <div class="callout reveal">
+      <h4>Both validators, run while writing this</h4>
+      <p style="font-family:'IBM Plex Mono',monospace;font-size:.82rem;line-height:1.7;color:var(--ink-2);">
+        <span style="color:var(--accent);">$</span> python scripts/validate_cdm.py<br>
+        &nbsp;&nbsp;<b style="color:var(--accent);">47 checks passed</b>, 1 note for human review, exit 0<br><br>
+        <span style="color:var(--accent);">$</span> python scripts/validate_dimensional_ldm_smx.py<br>
+        &nbsp;&nbsp;<b style="color:var(--accent);">70 checks passed</b>, 0 failed, 229 .sql files checked, exit 0
+      </p>
+    </div>
+
+    <div class="col reveal">
+      <h3 style="margin-bottom:.6rem;">What is deliberately not finished</h3>
+      <p>
+        Seven of the thirteen LDM modules are still generator-built rather than hand-locked, with their
+        borderline Dim-vs-Fact calls listed for review but not yet reviewed. Those six that are locked
+        cover the processes the client prioritised. The whole-phase <code>review.md</code> files for
+        stages 01&ndash;06 are empty by explicit, logged decision while per-deliverable review carried
+        the gate. Several <code>feedback/criteria.md</code> files and parts of
+        <code>docs/architecture.md</code> describe earlier taxonomies and are flagged as stale in place
+        rather than quietly rewritten &mdash; a historical record of what was true when it was written
+        is more useful than a doc that pretends it was always current.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 9. STACK ======================= -->
+<section id="stack">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">How it is built</p>
+      <h2>Repository shape and operating rules</h2>
+    </div>
+
+    <div class="stage-body reveal" style="grid-template-columns:1fr;">
+      <div class="col">
+        <p>
+          Everything is plain files under version control. There is no orchestration service and no
+          database of state &mdash; a stage's inputs are the previous stage's committed
+          <code>output/</code>, and a stage's memory is markdown a future session can read in one pass.
+        </p>
+        <p>
+          The four memory files are load-bearing rather than decorative:
+          <code>decisions.md</code> records the judgment call and the alternative that lost;
+          <code>learnings.md</code> records what worked and should be repeated;
+          <code>failure-journal.md</code> records what broke and how;
+          <code>session.md</code> records what happened in each working session and what the next one
+          should do first. A brand-new session with no transcript can reorient from those four plus
+          <code>CLAUDE.md</code>.
+        </p>
+      </div>
+    </div>
+
+    <div class="tree reveal" style="margin-top:1.2rem;">CLAUDE.md                  <b>global rules every session inherits</b>
+.claude/agents/            9 subagent personas, one per stage + the gate
+pipeline/
+  00-requirements/         SOW + 9 BPDs + 11 sessions &#8594; scoped requirements
+  01-isd/                  345 SQL files &#8594; 422 profiled tables
+  02-extended-isd/         7,834 join predicates &#8594; 820 relationships
+  03-graph-model/          632 nodes / 887 edges &#8594; collapse + shape decisions
+  04-cdm/                  &#8594; 303 conceptual entities, 13 diagrams
+  05-ldm/                  &#8594; 96 Dims / 133 Facts, keys, SCD, load strategy
+  06-smx/                  &#8594; 4,543 mapping rows + 229 executable .sql
+  07-data-marts/           &#8594; 47 gold marts + 11 client dictionaries
+    <b>each stage folder:</b>  PHASE.md &#183; input/ &#183; output/ &#183; feedback/{criteria,review}.md
+scripts/                   110 build scripts + 25 shared libraries
+  lib/                     db, sql_inventory, oracle_catalog, entity_collapse,
+                           grain_decomposition, drawio, cdm_layout, ldm_naming&#8230;
+  validate_cdm.py          47 checks &#8212; reads only final artifacts
+  validate_dimensional_ldm_smx.py   70 checks across LDM + SMX + generated SQL
+context/                   current-state understanding, rewritten in place
+memory/                    <b>decisions &#183; learnings &#183; failure-journal &#183; session</b>
+docs/                      architecture &#183; runbook &#183; framework reference</div>
+
+    <div class="col reveal" style="margin-top:2rem;">
+      <h4 style="margin-bottom:.5rem;">Stack</h4>
+      <p>
+        Claude Code subagents for every stage and every review. Python 3 in a project virtualenv:
+        <code>python-oracledb</code> in thick mode (11g will not accept a thin client),
+        <code>sqlglot</code> for SQL parsing, <code>openpyxl</code> for the SMX workbooks,
+        <code>networkx</code> for the spine/branch analysis, <code>tqdm</code> for progress.
+        Diagrams are generated draw.io mxGraph XML with a hand-rolled force-directed layout and
+        dependency-free HTML viewers. Target platform is S3 &rarr; Redshift &rarr; Tableau, with the
+        generated silver SQL written for the AWS Glue Spark SQL dialect against a Bronze / Silver /
+        Gold catalog.
+      </p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>
+      <strong style="color:var(--ink-2);">Data Modelling Agent</strong> &mdash; an eight-stage agentic
+      pipeline for reverse-engineering an undocumented production database into a governed,
+      gate-reviewed data model. Client details are referenced only as far as they explain the
+      engineering.
+    </p>
+    <p class="mono" style="font-size:.76rem;">
+      Figures on this page were re-derived from the repository artifacts, not copied from its
+      documentation.
+    </p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var nodes = document.querySelectorAll('.reveal');
+  if (reduce || !('IntersectionObserver' in window)) {
+    nodes.forEach(function (n) { n.classList.add('in'); });
+    return;
+  }
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+    });
+  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.06 });
+  nodes.forEach(function (n) { io.observe(n); });
+})();
+</script>
+
+</body>
+</html>

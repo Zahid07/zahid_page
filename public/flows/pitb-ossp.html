@@ -1,0 +1,1319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OSSP Data Platform — how the lakehouse works</title>
+<meta name="description" content="On-prem government data warehouse for Punjab's Online Statistical System: Airflow-orchestrated Delta/Trino curated layer, ClickHouse semantic serving, metadata-driven jobs.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+  :root {
+    --paper:      #F1F3F2;
+    --surface:    #FAFBFA;
+    --surface-2:  #E7EBE9;
+    --ink:        #16201F;
+    --ink-2:      #3E4C4A;
+    --ink-3:      #6B7A77;
+    --rule:       #CFD8D5;
+    --rule-soft:  #DFE5E3;
+
+    --pine:       #0F6E63;
+    --pine-soft:  #DCEBE8;
+    --amber:      #9A5B00;
+    --amber-soft: #F5E8D2;
+    --oxide:      #9E2B18;
+    --oxide-soft: #F6DED9;
+    --cool:       #2B5F8A;
+    --cool-soft:  #DCE6F0;
+
+    --shadow: 0 1px 2px rgba(22,32,31,.06), 0 8px 24px -12px rgba(22,32,31,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0E1413;
+      --surface:    #151D1C;
+      --surface-2:  #1E2827;
+      --ink:        #E4EAE8;
+      --ink-2:      #B0BEBB;
+      --ink-3:      #7F8F8C;
+      --rule:       #2C3937;
+      --rule-soft:  #222D2C;
+      --pine:       #5FC4B4;
+      --pine-soft:  #12312D;
+      --amber:      #D99A4E;
+      --amber-soft: #33240F;
+      --oxide:      #E08575;
+      --oxide-soft: #381914;
+      --cool:       #7BA7D4;
+      --cool-soft:  #1A2838;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #0E1413;
+    --surface:    #151D1C;
+    --surface-2:  #1E2827;
+    --ink:        #E4EAE8;
+    --ink-2:      #B0BEBB;
+    --ink-3:      #7F8F8C;
+    --rule:       #2C3937;
+    --rule-soft:  #222D2C;
+    --pine:       #5FC4B4;
+    --pine-soft:  #12312D;
+    --amber:      #D99A4E;
+    --amber-soft: #33240F;
+    --oxide:      #E08575;
+    --oxide-soft: #381914;
+    --cool:       #7BA7D4;
+    --cool-soft:  #1A2838;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 24px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  .col  { max-width: 68ch; }
+
+  h1, h2, h3, .label, .stage-n, th, .mono, .l { font-family: "Archivo", "Helvetica Neue", Arial, sans-serif; }
+
+  h1 {
+    font-size: clamp(2.1rem, 5vw, 3.1rem);
+    font-weight: 700;
+    letter-spacing: -.025em;
+    line-height: 1.05;
+    text-wrap: balance;
+    margin: 0 0 .5rem;
+  }
+  h2 {
+    font-size: clamp(1.35rem, 2.4vw, 1.7rem);
+    font-weight: 600;
+    letter-spacing: -.015em;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h3 {
+    font-size: 1.02rem;
+    font-weight: 600;
+    letter-spacing: -.005em;
+    margin: 0 0 .4rem;
+  }
+  p { margin: 0 0 1.05rem; }
+  a { color: var(--pine); text-underline-offset: 3px; }
+  strong { font-weight: 600; }
+  em { font-style: italic; color: var(--ink-2); }
+
+  .label {
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .lede {
+    font-size: 1.16rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 62ch;
+  }
+
+  code, .mono, pre, .m, .s { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+  code {
+    font-size: .85em;
+    background: var(--surface-2);
+    padding: .12em .38em;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 6px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: .78rem;
+    line-height: 1.6;
+    margin: 0 0 1.05rem;
+    color: var(--ink-2);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  pre .c { color: var(--ink-3); }
+  pre .h { color: var(--pine); font-weight: 500; }
+
+  header.masthead {
+    padding: 72px 0 40px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .kicker {
+    display: flex; gap: 14px; align-items: baseline;
+    margin-bottom: 22px; flex-wrap: wrap;
+  }
+  .kicker .sep { color: var(--rule); }
+
+  .theme-btn {
+    position: absolute; top: 72px; right: 0;
+    font-family: "Archivo", sans-serif;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase;
+    background: var(--surface);
+    color: var(--ink-2);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: .45em .75em;
+    cursor: pointer;
+  }
+  .theme-btn:hover { border-color: var(--pine); color: var(--pine); }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--rule-soft); }
+  section:last-of-type { border-bottom: none; }
+  .sec-head { display: flex; gap: 18px; align-items: baseline; margin-bottom: 28px; }
+  .sec-head .num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; font-weight: 700;
+    color: var(--pine);
+    padding-top: .35em;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+
+  .pipeline { display: flex; flex-direction: column; gap: 0; margin-top: 8px; }
+  .stage {
+    display: grid;
+    grid-template-columns: 58px 1fr;
+    gap: 22px;
+    position: relative;
+    padding: 22px 0;
+  }
+  .stage:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: 28px; top: 56px; bottom: -6px;
+    width: 2px;
+    background: linear-gradient(var(--rule), var(--rule-soft));
+  }
+  .stage-n {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--surface);
+    border: 2px solid var(--rule);
+    font-size: .82rem; font-weight: 700;
+    color: var(--ink-2);
+    position: relative; z-index: 1;
+  }
+  .stage.raw .stage-n { border-color: var(--amber); color: var(--amber); }
+  .stage.cur .stage-n { border-color: var(--pine); color: var(--pine); }
+  .stage.sem .stage-n { border-color: var(--cool); color: var(--cool); }
+
+  .stage-body { padding-top: 4px; min-width: 0; }
+  .stage-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  .stage-body p { margin-bottom: .7rem; max-width: 62ch; }
+
+  .chip {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .64rem; font-weight: 500;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: .25em .6em; border-radius: 3px;
+    white-space: nowrap;
+  }
+  .chip.raw { background: var(--amber-soft); color: var(--amber); }
+  .chip.cur { background: var(--pine-soft); color: var(--pine); }
+  .chip.sem { background: var(--cool-soft); color: var(--cool); }
+
+  .gate {
+    border-left: 3px solid var(--oxide);
+    background: var(--oxide-soft);
+    padding: 10px 14px;
+    border-radius: 0 4px 4px 0;
+    font-size: .9rem;
+    color: var(--ink);
+    max-width: 62ch;
+  }
+  .gate .label { color: var(--oxide); display: block; margin-bottom: 2px; }
+
+  .t-wrap { overflow-x: auto; border: 1px solid var(--rule-soft); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th {
+    text-align: left;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { color: var(--ink); }
+  td.num { font-family: "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+
+  .filemap {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .frow {
+    display: grid;
+    grid-template-columns: minmax(190px, 260px) 1fr;
+    gap: 20px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--rule-soft);
+    align-items: baseline;
+  }
+  .frow:last-child { border-bottom: none; }
+  .frow .path {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .8rem;
+    color: var(--pine);
+    word-break: break-word;
+  }
+  .frow .what { font-size: .93rem; color: var(--ink-2); }
+  .frow .what b { color: var(--ink); font-weight: 600; }
+
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--pine);
+    border-radius: 0 6px 6px 0;
+    padding: 16px 20px;
+  }
+  .note.warn { border-left-color: var(--amber); }
+  .note p:last-child { margin-bottom: 0; }
+  .note .hd {
+    font-family: "Archivo", sans-serif;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--pine); margin: 0 0 .4rem;
+  }
+  .note.warn .hd { color: var(--amber); }
+
+  .tier {
+    border: 1px solid var(--rule);
+    border-top-width: 3px;
+    border-radius: 6px;
+    padding: 16px 18px;
+    background: var(--surface);
+  }
+  .tier.allow { border-top-color: var(--pine); }
+  .tier.ask   { border-top-color: var(--amber); }
+  .tier.deny  { border-top-color: var(--cool); }
+  .tier h3 { margin-bottom: 8px; }
+  .tier p { font-size: .9rem; color: var(--ink-2); margin-bottom: 0; }
+  .tier ul { margin: 0; padding-left: 1.1em; font-size: .88rem; color: var(--ink-2); }
+  .tier li { margin-bottom: 5px; }
+
+  figure {
+    margin: 1.6rem 0 1rem;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 1.5rem 1.3rem 1.1rem;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  figcaption {
+    font-family: "Archivo", sans-serif;
+    font-size: .75rem;
+    color: var(--ink-3);
+    margin-top: 1rem;
+    padding-top: .85rem;
+    border-top: 1px solid var(--rule);
+    line-height: 1.5;
+  }
+  svg { display: block; max-width: 100%; height: auto; }
+  .l { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .m { font-size: 11px; }
+  .s { font-size: 10px; }
+
+  .board {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin: 1.2rem 0;
+  }
+  .cell {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 6px;
+    padding: 14px 16px;
+  }
+  .cell b {
+    display: block;
+    font-family: "Archivo", sans-serif;
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -.02em;
+    margin-bottom: .15rem;
+  }
+  .cell span { font-size: .78rem; color: var(--ink-3); line-height: 1.35; }
+  .cell.hi { border-color: var(--pine); background: var(--pine-soft); }
+
+  ul { margin: 0 0 1.05rem; padding-left: 1.25rem; }
+  li { margin-bottom: .4rem; }
+
+  footer {
+    padding-top: 40px;
+    color: var(--ink-3);
+    font-size: .88rem;
+    border-top: 1px solid var(--rule-soft);
+    margin-top: 20px;
+    font-family: "Archivo", sans-serif;
+  }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; padding: 0 18px 64px; }
+    .stage { grid-template-columns: 40px 1fr; gap: 16px; }
+    .stage-n { width: 40px; height: 40px; font-size: .72rem; }
+    .stage:not(:last-child)::after { left: 19px; top: 42px; }
+    .frow { grid-template-columns: 1fr; gap: 4px; }
+    .sec-head { gap: 12px; }
+    .theme-btn { position: static; margin-bottom: 1rem; }
+  }
+  :focus-visible { outline: 2px solid var(--pine); outline-offset: 2px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <button class="theme-btn" type="button" id="themeToggle" aria-label="Toggle colour theme">Theme</button>
+    <div class="kicker">
+      <span class="label">PITB · Punjab Bureau of Statistics</span>
+      <span class="sep">/</span>
+      <span class="label">OSS Online Statistical System</span>
+      <span class="sep">/</span>
+      <span class="label">on-prem lakehouse</span>
+    </div>
+    <h1>How the data platform<br>is actually wired</h1>
+    <p class="lede">
+      A metadata-driven warehouse that lands multi-sector government data into Delta Lake,
+      models it as a star schema under Trino, then serves denormalised thin layers from ClickHouse.
+      Airflow does not contain the graph — MySQL does.
+    </p>
+  </header>
+
+  <!-- 01 shape -->
+  <section>
+    <div class="sec-head">
+      <span class="num">01</span>
+      <h2>The shape of the system</h2>
+    </div>
+    <div class="col">
+      <p>
+        This repository is the code plane of Punjab’s OSS data platform: Airflow DAGs, SQL jobs,
+        and a shared Python kernel. It runs on-prem under
+        <code>/edw/prod/code/ossp-data-platform-code/</code>. Dev and prod are the same tree;
+        an Airflow Variable named <code>env</code> chooses prefixes, hosts, and catalogs.
+      </p>
+      <p>
+        The lakehouse is not a single store. Raw and curated live as Delta tables on MinIO,
+        queried through Trino catalog <code>delta_lake</code> (and <code>delta_lake_secure</code>
+        for PII-heavy departments). Semantic staging is a Hive catalog write. Serving is ClickHouse.
+        MySQL <code>pitb_monitoring</code> is the control plane: pipelines, tasks, ingestion
+        parameters, watermarks, and operational logs.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 420" role="img" aria-label="Lakehouse layers from source systems through staging, raw, curated, semantic staging, and ClickHouse serving">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <!-- sources -->
+        <rect x="8" y="28" width="168" height="364" rx="8" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="92" y="52" text-anchor="middle" class="l" fill="var(--ink-3)">Sources</text>
+        <rect x="22" y="68" width="140" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="92" y="86" text-anchor="middle" class="m" fill="var(--ink)">JDBC / Trino</text>
+        <text x="92" y="102" text-anchor="middle" class="s" fill="var(--ink-3)">sector OLTP DBs</text>
+        <rect x="22" y="124" width="140" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="92" y="142" text-anchor="middle" class="m" fill="var(--ink)">REST APIs</text>
+        <text x="92" y="158" text-anchor="middle" class="s" fill="var(--ink-3)">eStamp · PRA · PFA · PLRA</text>
+        <rect x="22" y="180" width="140" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="92" y="198" text-anchor="middle" class="m" fill="var(--ink)">Sqoop + Hadoop</text>
+        <text x="92" y="214" text-anchor="middle" class="s" fill="var(--ink-3)">health → HDFS → MinIO</text>
+        <rect x="22" y="236" width="140" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="92" y="254" text-anchor="middle" class="m" fill="var(--ink)">Kafka</text>
+        <text x="92" y="270" text-anchor="middle" class="s" fill="var(--ink-3)">special education</text>
+        <rect x="22" y="292" width="140" height="44" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="92" y="310" text-anchor="middle" class="m" fill="var(--ink)">CSV / Excel</text>
+        <text x="92" y="326" text-anchor="middle" class="s" fill="var(--ink-3)">PBS · one-off loads</text>
+        <text x="92" y="368" text-anchor="middle" class="s" fill="var(--ink-3)">Airflow BashOperators</text>
+
+        <line x1="176" y1="210" x2="212" y2="210" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <!-- staging + raw -->
+        <rect x="214" y="78" width="196" height="264" rx="8" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="1.6"/>
+        <text x="312" y="64" text-anchor="middle" class="l" fill="var(--amber)">Delta Lake · MinIO</text>
+        <text x="312" y="112" text-anchor="middle" class="l" fill="var(--amber)">Staging</text>
+        <text x="312" y="130" text-anchor="middle" class="s" fill="var(--ink-2)">truncated each run</text>
+        <text x="312" y="146" text-anchor="middle" class="s" fill="var(--ink-2)">dd_* / dp_* schema</text>
+        <line x1="248" y1="168" x2="376" y2="168" stroke="var(--amber)" stroke-width="1" opacity=".5"/>
+        <text x="312" y="198" text-anchor="middle" class="l" fill="var(--amber)">Raw</text>
+        <text x="312" y="216" text-anchor="middle" class="s" fill="var(--ink-2)">full · overwrite</text>
+        <text x="312" y="232" text-anchor="middle" class="s" fill="var(--ink-2)">CDC 1/2 watermark</text>
+        <text x="312" y="248" text-anchor="middle" class="s" fill="var(--ink-2)">merge or append</text>
+        <text x="312" y="278" text-anchor="middle" class="s" fill="var(--amber)">dl_rw_job.py</text>
+        <text x="312" y="304" text-anchor="middle" class="s" fill="var(--ink-3)">catalog delta_lake</text>
+        <text x="312" y="320" text-anchor="middle" class="s" fill="var(--ink-3)">secure catalog for PII</text>
+
+        <line x1="410" y1="210" x2="446" y2="210" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <!-- curated -->
+        <rect x="448" y="78" width="196" height="264" rx="8" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="1.6"/>
+        <text x="546" y="64" text-anchor="middle" class="l" fill="var(--pine)">Curated star</text>
+        <text x="546" y="118" text-anchor="middle" class="l" fill="var(--pine)">dd_curated / dp_curated</text>
+        <text x="546" y="144" text-anchor="middle" class="s" fill="var(--ink-2)">lookups  lkp</text>
+        <text x="546" y="162" text-anchor="middle" class="s" fill="var(--ink-2)">helpings  hlp</text>
+        <text x="546" y="180" text-anchor="middle" class="s" fill="var(--ink-2)">dimensions  dim</text>
+        <text x="546" y="198" text-anchor="middle" class="s" fill="var(--ink-2)">facts  fct</text>
+        <text x="546" y="230" text-anchor="middle" class="s" fill="var(--pine)">run_ct_job.py → Trino</text>
+        <text x="546" y="256" text-anchor="middle" class="s" fill="var(--ink-3)">MERGE / INSERT SQL</text>
+        <text x="546" y="272" text-anchor="middle" class="s" fill="var(--ink-3)">:env  :batch_id tokens</text>
+        <text x="546" y="304" text-anchor="middle" class="s" fill="var(--ink-3)">+ _secure schemas</text>
+        <text x="546" y="320" text-anchor="middle" class="s" fill="var(--ink-3)">citizen · tax · PSER</text>
+
+        <line x1="644" y1="210" x2="680" y2="210" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <!-- semantic stg + clickhouse -->
+        <rect x="682" y="28" width="390" height="364" rx="8" fill="var(--cool-soft)" stroke="var(--cool)" stroke-width="1.6"/>
+        <text x="877" y="52" text-anchor="middle" class="l" fill="var(--cool)">Serving path</text>
+
+        <rect x="700" y="72" width="354" height="110" rx="6" fill="var(--surface)" stroke="var(--cool)"/>
+        <text x="877" y="98" text-anchor="middle" class="l" fill="var(--cool)">Semantic staging</text>
+        <text x="877" y="118" text-anchor="middle" class="s" fill="var(--ink-2)">hive.:env_semantic_stg  ←  curated</text>
+        <text x="877" y="134" text-anchor="middle" class="s" fill="var(--ink-2)">MinIO parquet  dd-/dp-semantic-stg</text>
+        <text x="877" y="158" text-anchor="middle" class="s" fill="var(--cool)">run_ld_job.py  ·  dl_ld job</text>
+
+        <line x1="877" y1="182" x2="877" y2="208" stroke="var(--cool)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <rect x="700" y="210" width="354" height="158" rx="6" fill="var(--surface)" stroke="var(--cool)"/>
+        <text x="877" y="236" text-anchor="middle" class="l" fill="var(--cool)">ClickHouse semantic</text>
+        <text x="877" y="256" text-anchor="middle" class="s" fill="var(--ink-2)">dd_semantic / dp_semantic</text>
+        <text x="877" y="272" text-anchor="middle" class="s" fill="var(--ink-2)">thin layers  tl_*  for dashboards</text>
+        <text x="877" y="288" text-anchor="middle" class="s" fill="var(--ink-2)">s3() parquet  →  MergeTree</text>
+        <text x="877" y="316" text-anchor="middle" class="s" fill="var(--cool)">run_sm_job.py  ·  ch_semantic job</text>
+        <text x="877" y="344" text-anchor="middle" class="s" fill="var(--ink-3)">Flask APIs · RBAC · BI</text>
+      </svg>
+      <figcaption>
+        Four storage seams, two query engines. Staging and raw are Delta. Curated is still Delta, modelled as a star.
+        Semantic staging is Hive/MinIO parquet. ClickHouse is the serving store. Prefix <code>dd_</code> is dev, <code>dp_</code> is prod.
+      </figcaption>
+    </figure>
+
+    <div class="board">
+      <div class="cell"><b>~183</b><span>Airflow Python files</span></div>
+      <div class="cell"><b>~2,700</b><span>files under Jobs/</span></div>
+      <div class="cell hi"><b>~1,730</b><span>curated SQL (facts, dims, lookups, helpings)</span></div>
+      <div class="cell"><b>~340</b><span>semantic / thin-layer SQL</span></div>
+      <div class="cell"><b>~290</b><span>ldr semantic-staging SQL</span></div>
+      <div class="cell"><b>4</b><span>generic runners that execute almost all of it</span></div>
+    </div>
+  </section>
+
+  <!-- 02 e2e -->
+  <section>
+    <div class="sec-head">
+      <span class="num">02</span>
+      <h2>End to end</h2>
+    </div>
+    <div class="col">
+      <p>
+        Six stages. The DAG file only names a <code>pipeline_id</code>. Everything else —
+        schedule, task list, bash command, upstreams — is loaded from MySQL at parse time.
+      </p>
+    </div>
+
+    <div class="pipeline">
+
+      <div class="stage raw">
+        <div class="stage-n">01</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Register the table</h3>
+            <span class="chip raw">ops / metadata</span>
+          </div>
+          <p>
+            <code>automation/automate.py</code> (and cousins) onboard a source table into
+            <code>pitb_monitoring.ingestion_metadata</code>: department, source system, extraction type,
+            watermarks, staging/raw DDL, merge column, masking, catalog id.
+            <code>task_metatable</code> rows attach that table to a pipeline and order it.
+          </p>
+          <div class="gate">
+            <span class="label">Gate</span>
+            A raw task whose <code>is_productionised = 0</code> is stripped from the DAG at parse time
+            by <code>generate_pipeline_dependency</code>. Unpublished tables never run in prod by accident.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage raw">
+        <div class="stage-n">02</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Land raw</h3>
+            <span class="chip raw">dl_raw job</span>
+          </div>
+          <p>
+            Airflow runs <code>python Jobs/RAW/dl_rw_job.py &lt;source&gt; &lt;db&gt; &lt;table&gt; &lt;env&gt; &lt;batch_id&gt;</code>.
+            The job reads ingestion params, truncates staging, then branches on
+            <code>src_extraction_type</code> × <code>raw_ingestion_type</code>:
+          </p>
+          <ul>
+            <li><code>full_load</code> — Trino INSERT, or Sqoop for <code>agri_smart</code> / <code>db_literacydrive</code> (and the Hadoop path for health).</li>
+            <li><code>api</code> + <code>overwrite</code> — generic API extractor, then append/overwrite into Delta.</li>
+            <li><code>cdc_one_watermark</code> / <code>cdc_two_watermark</code> — stage the delta, then <code>tbl_merge</code> or <code>tbl_append</code> on raw.</li>
+          </ul>
+          <p>
+            Schema names are rewritten: <code>delta_lake.</code> becomes <code>delta_lake.dd_</code> or
+            <code>delta_lake.dp_</code>. Departments <code>excisetaxation</code>, <code>citizen</code>,
+            <code>pser</code> (and a MySQL path) land in <code>delta_lake_secure</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage cur">
+        <div class="stage-n">03</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Build the star</h3>
+            <span class="chip cur">ch_curated job</span>
+          </div>
+          <p>
+            <code>Jobs/Curated/run_ct_job.py</code> loads a SQL file, substitutes
+            <code>:env</code> / <code>:start_date</code> / <code>:end_date</code> / <code>:batch_id</code> /
+            <code>:table_name</code>, and executes it on Trino. Layer tag in operational metadata:
+            <code>CURATED</code>. Target schemas: <code>dd_curated</code> or <code>dp_curated</code>
+            (<code>_secure</code> if the filename contains <code>secure</code>).
+          </p>
+          <p>
+            Sector DAGs usually fire in waves: Lookups → Dimensions → Facts. Helpings
+            (<code>*_hlp</code>) are the bridge tables — citizen keys, location hierarchy, hospital keys —
+            that facts join instead of hitting raw.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage sem">
+        <div class="stage-n">04</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Copy into semantic staging</h3>
+            <span class="chip sem">dl_ld job</span>
+          </div>
+          <p>
+            <code>Jobs/ldr/run_ld_job.py</code> runs Trino SQL that deletes and inserts
+            <code>hive.:env_semantic_stg.&lt;table&gt;</code> from <code>delta_lake.:env_curated</code>.
+            That Hive write is the parquet landing MinIO later exposes as
+            <code>dd-semantic-stg</code> / <code>dp-semantic-stg</code> (and <code>-secure</code>).
+            Operational layer: <code>SEMANTIC_STG</code>. Vacuum on the curated Delta table follows unless opted out.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage sem">
+        <div class="stage-n">05</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Serve from ClickHouse</h3>
+            <span class="chip sem">ch_semantic job</span>
+          </div>
+          <p>
+            <code>Jobs/Semantic/run_sm_job.py</code> injects an S3 parquet path
+            (<code>s3('…/dd-semantic-stg/&lt;table&gt;/2*', …, 'Parquet')</code>) into the SQL
+            as <code>:input_path</code>, then runs it with <code>clickhouse-client</code> on port 9440 (TLS).
+            Thin-layer scripts (<code>tl_*</code>) truncate and rebuild denormalised dashboard tables
+            in <code>dd_semantic</code> / <code>dp_semantic</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage cur">
+        <div class="stage-n">06</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Close the batch</h3>
+            <span class="chip cur">control plane</span>
+          </div>
+          <p>
+            <code>end_batch</code> (via <code>dag_status</code>, trigger rule <code>ALL_DONE</code>)
+            writes pipeline status, clears the running mutex, and in prod emails a PITB list on failure.
+            If the pipeline publishes an Airflow Dataset, downstream DAGs scheduled on that Dataset can fire.
+          </p>
+          <div class="gate">
+            <span class="label">Gate — mutex</span>
+            <code>start_batch</code> refuses to start if <code>pipeline_metadata.running = 1</code>.
+            Two concurrent runs of the same pipeline are not allowed.
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 03 airflow -->
+  <section>
+    <div class="sec-head">
+      <span class="num">03</span>
+      <h2>Airflow is a renderer, not a graph</h2>
+    </div>
+    <div class="col">
+      <p>
+        Almost every file under <code>Airflow/</code> is the same template with two literals changed:
+        <code>dag_number</code> (the <code>pipeline_id</code>) and <code>dag_id</code>.
+        <code>commons/create_dag_file.py</code> is the generator; the checked-in DAGs are the output.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 280" role="img" aria-label="Metadata-driven Airflow parse: MySQL tables become DAG schedule, Dataset outlets, and BashOperator tasks">
+        <defs>
+          <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="8" y="40" width="220" height="200" rx="8" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="118" y="68" text-anchor="middle" class="l" fill="var(--ink-3)">MySQL pitb_monitoring</text>
+        <text x="118" y="98" text-anchor="middle" class="s" fill="var(--ink-2)">pipeline_metadata</text>
+        <text x="118" y="116" text-anchor="middle" class="s" fill="var(--ink-2)">task_metatable</text>
+        <text x="118" y="134" text-anchor="middle" class="s" fill="var(--ink-2)">ingestion_metadata</text>
+        <text x="118" y="152" text-anchor="middle" class="s" fill="var(--ink-2)">batch_metadata</text>
+        <text x="118" y="170" text-anchor="middle" class="s" fill="var(--ink-2)">operational_metadata</text>
+        <text x="118" y="188" text-anchor="middle" class="s" fill="var(--ink-2)">pipeline_metadata_dependency</text>
+        <text x="118" y="214" text-anchor="middle" class="s" fill="var(--ink-3)">reconciliation · backfill</text>
+
+        <line x1="228" y1="140" x2="268" y2="140" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+        <rect x="270" y="70" width="250" height="140" rx="8" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="1.6"/>
+        <text x="395" y="56" text-anchor="middle" class="l" fill="var(--pine)">Parse time</text>
+        <text x="395" y="104" text-anchor="middle" class="m" fill="var(--ink)">EducationFacts_dag.py</text>
+        <text x="395" y="124" text-anchor="middle" class="s" fill="var(--ink-2)">dag_number = 39</text>
+        <text x="395" y="142" text-anchor="middle" class="s" fill="var(--ink-2)">env ← Airflow Variable</text>
+        <text x="395" y="168" text-anchor="middle" class="s" fill="var(--pine)">generate_pipeline_dependency()</text>
+        <text x="395" y="186" text-anchor="middle" class="s" fill="var(--ink-3)">schedule + Dataset outlets</text>
+
+        <line x1="520" y1="140" x2="560" y2="140" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+        <rect x="562" y="40" width="510" height="200" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="817" y="68" text-anchor="middle" class="l" fill="var(--ink)">Runtime graph</text>
+
+        <rect x="582" y="88" width="110" height="48" rx="5" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="637" y="108" text-anchor="middle" class="s" fill="var(--pine)">start_batch</text>
+        <text x="637" y="124" text-anchor="middle" class="s" fill="var(--ink-3)">XCom batch_id</text>
+
+        <line x1="692" y1="112" x2="722" y2="112" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+        <rect x="724" y="78" width="150" height="68" rx="5" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="799" y="100" text-anchor="middle" class="s" fill="var(--amber)">BashOperator</text>
+        <text x="799" y="116" text-anchor="middle" class="s" fill="var(--ink-2)">typed by task_description</text>
+        <text x="799" y="132" text-anchor="middle" class="s" fill="var(--ink-3)">dep edges from MySQL</text>
+
+        <line x1="874" y1="112" x2="904" y2="112" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+        <rect x="906" y="88" width="142" height="48" rx="5" fill="var(--cool-soft)" stroke="var(--cool)"/>
+        <text x="977" y="108" text-anchor="middle" class="s" fill="var(--cool)">end_batch</text>
+        <text x="977" y="124" text-anchor="middle" class="s" fill="var(--ink-3)">ALL_DONE · Dataset</text>
+
+        <text x="817" y="214" text-anchor="middle" class="s" fill="var(--ink-3)">Slack conn optional · PITB email on prod failure</text>
+      </svg>
+      <figcaption>
+        Task type is a substring of <code>task_description</code>. The bash line is assembled from
+        <code>application_arguments</code> plus env and the batch id pulled from XCom.
+      </figcaption>
+    </figure>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr>
+            <th>task_description contains</th>
+            <th>Runs</th>
+            <th>Layer</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">dl_raw job</td>
+            <td><code>Jobs/RAW/&lt;args&gt;</code> — usually <code>dl_rw_job.py</code></td>
+            <td>Staging + Raw (Delta)</td>
+          </tr>
+          <tr>
+            <td class="num">ch_curated job</td>
+            <td><code>Jobs/Curated/run_ct_job.py …</code></td>
+            <td>Curated (Trino → Delta)</td>
+          </tr>
+          <tr>
+            <td class="num">dl_ld job</td>
+            <td><code>Jobs/ldr/run_ld_job.py …</code></td>
+            <td>Semantic staging (Hive / MinIO)</td>
+          </tr>
+          <tr>
+            <td class="num">ch_semantic job</td>
+            <td><code>Jobs/Semantic/run_sm_job.py …</code></td>
+            <td>ClickHouse semantic</td>
+          </tr>
+          <tr>
+            <td class="num">sit job</td>
+            <td><code>Jobs/sit/run_sit_job.py …</code></td>
+            <td>Curated-style Trino SQL (360-view / PIP marts)</td>
+          </tr>
+          <tr>
+            <td class="num">trigger</td>
+            <td><code>sh automation/&lt;script&gt;</code></td>
+            <td>File-drop / wait-for-trigger</td>
+          </tr>
+          <tr>
+            <td class="num">external_task_sensor</td>
+            <td>Airflow <code>ExternalTaskSensor</code></td>
+            <td>Cross-DAG wait (same schedule required)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid-2" style="margin-top:22px">
+      <div class="note">
+        <p class="hd">Scheduling</p>
+        <p>
+          Cron comes from <code>pipeline_metadata.pipeline_schedule</code>. If
+          <code>pipeline_metadata_dependency.dependency_datasets</code> is set, the DAG
+          schedules on Airflow Datasets instead, and <code>end_batch</code> publishes
+          <code>dataset_name</code> as an outlet. That is how Lookups → Dimensions → Facts
+          chain without a giant single DAG.
+        </p>
+      </div>
+      <div class="note warn">
+        <p class="hd">What is not in the DAG file</p>
+        <p>
+          Table lists, SQL paths, watermarks, and task order. Changing a pipeline’s graph is a
+          MySQL edit (or <code>pipeline_dependency_insert</code> / <code>_delete</code> DAGs),
+          not a Python PR — until someone regenerates the DAG to pick up a new <code>dag_number</code>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 jobs -->
+  <section>
+    <div class="sec-head">
+      <span class="num">04</span>
+      <h2>Jobs: four folders, one star, one thin layer</h2>
+    </div>
+    <div class="col">
+      <p>
+        SQL is the model. Python is a runner. Curated SQL is organised the way a warehouse team
+        thinks: lookups, helpings, dimensions, facts — not by source system. Semantic SQL is organised
+        by dashboard subject (<code>hed_thin_layer</code>, <code>hmis_thinlayer</code>,
+        <code>edu_thin_layer</code>, …).
+      </p>
+    </div>
+
+    <div class="filemap" style="margin-top:8px">
+      <div class="frow">
+        <div class="path">Jobs/RAW/</div>
+        <div class="what"><b>Generic lander plus API specialists.</b> <code>dl_rw_job.py</code> is the JDBC/CDC/API router. Side folders cover eStamp, PRA, PFA, PLRA, PBS CSV, Excel.</div>
+      </div>
+      <div class="frow">
+        <div class="path">Jobs/Curated/</div>
+        <div class="what"><b>Star schema on Delta.</b> <code>facts/</code> (~295 files), <code>dimensions/</code> (~603), <code>lookups/</code> (~93), <code>helpings/</code> (~703). Runner: <code>run_ct_job.py</code>. Backfill twin: <code>run_trino_backfill_job.py</code>.</div>
+      </div>
+      <div class="frow">
+        <div class="path">Jobs/ldr/</div>
+        <div class="what"><b>Curated → Hive semantic staging.</b> Same grain as curated tables, often suffixed <code>_ld</code>. Copies keys and measures so ClickHouse can read parquet without querying Delta.</div>
+      </div>
+      <div class="frow">
+        <div class="path">Jobs/Semantic/</div>
+        <div class="what"><b>ClickHouse serving + thin layers.</b> Facts/dims mirrored, then <code>tl_*</code> denormalisations (program categories, location names, dashboard grains). Runners: <code>run_sm_job.py</code>, FDIP variants.</div>
+      </div>
+      <div class="frow">
+        <div class="path">Jobs/sit/</div>
+        <div class="what"><b>SIT marts.</b> Same Trino runner shape as curated. DAGs named for 360-views (schools, farmers, locations, CIS wing, commodities) rather than sector stars.</div>
+      </div>
+    </div>
+
+    <h3 style="margin:2rem 0 .6rem">Curated object types</h3>
+    <div class="grid-3">
+      <div class="tier allow">
+        <h3>Lookups <code>lkp</code></h3>
+        <p>Small codes and reference lists (wards, blood groups, banks, roles). Loaded first so dims and facts can resolve keys.</p>
+      </div>
+      <div class="tier ask">
+        <h3>Helpings <code>hlp</code></h3>
+        <p>Bridge / conformed-key tables. <code>citizen_hlp</code> maps source person ids to a warehouse citizen key. Location helpings land division / district / tehsil per department.</p>
+      </div>
+      <div class="tier deny">
+        <h3>Dims and facts</h3>
+        <p>Dims often <code>MERGE</code> on a business key. Facts <code>INSERT</code> with a surrogate (<code>SUM(1) OVER (ROWS UNBOUNDED PRECEDING)</code> on top of <code>max_*_key</code>). Audit columns: <code>ins_tmstmp</code>, <code>upd_tmstmp</code>, <code>batch_id</code>, <code>oper</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 representative -->
+  <section>
+    <div class="sec-head">
+      <span class="num">05</span>
+      <h2>A representative job: Health HMIS</h2>
+    </div>
+    <div class="col">
+      <p>
+        One sector, four DAGs, the full layer walk. Education, Finance, Agriculture, HED, Dastak,
+        Livestock, and FDIP repeat this shape. HMIS is the clearest because the SQL still shows
+        the join from raw patients through helpings into a conformed patient dimension.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 340" role="img" aria-label="Health HMIS representative flow from HMIS OLTP through raw, helpings, patient dim, facts, ldr, and ClickHouse thin layer">
+        <defs>
+          <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="8" y="120" width="150" height="80" rx="7" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="83" y="150" text-anchor="middle" class="l" fill="var(--ink)">HMIS OLTP</text>
+        <text x="83" y="170" text-anchor="middle" class="s" fill="var(--ink-3)">patients · visits</text>
+        <text x="83" y="186" text-anchor="middle" class="s" fill="var(--ink-3)">pharmacy · billing</text>
+
+        <line x1="158" y1="160" x2="196" y2="160" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+        <rect x="198" y="108" width="168" height="104" rx="7" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="1.6"/>
+        <text x="282" y="92" text-anchor="middle" class="l" fill="var(--amber)">HMIS_Central DAG</text>
+        <text x="282" y="140" text-anchor="middle" class="m" fill="var(--ink)">dl_rw_job</text>
+        <text x="282" y="158" text-anchor="middle" class="s" fill="var(--ink-2)">…_hmisv2…_raw.patients</text>
+        <text x="282" y="176" text-anchor="middle" class="s" fill="var(--ink-3)">CDC or full_load</text>
+        <text x="282" y="194" text-anchor="middle" class="s" fill="var(--amber)">Delta / MinIO</text>
+
+        <line x1="366" y1="160" x2="404" y2="160" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+        <!-- curated stack -->
+        <rect x="406" y="36" width="280" height="268" rx="8" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="1.6"/>
+        <text x="546" y="22" text-anchor="middle" class="l" fill="var(--pine)">Curated DAGs</text>
+
+        <rect x="422" y="52" width="248" height="48" rx="5" fill="var(--surface)" stroke="var(--pine)"/>
+        <text x="546" y="72" text-anchor="middle" class="s" fill="var(--pine)">healthhmisLookups</text>
+        <text x="546" y="88" text-anchor="middle" class="s" fill="var(--ink-3)">ward · department · diagnosis lkp</text>
+
+        <rect x="422" y="110" width="248" height="78" rx="5" fill="var(--surface)" stroke="var(--pine)"/>
+        <text x="546" y="130" text-anchor="middle" class="s" fill="var(--pine)">healthhmisDimension</text>
+        <text x="546" y="148" text-anchor="middle" class="s" fill="var(--ink-2)">citizen_hlp → citizen_hub</text>
+        <text x="546" y="164" text-anchor="middle" class="s" fill="var(--ink-2)">MERGE health_patient_dim</text>
+        <text x="546" y="180" text-anchor="middle" class="s" fill="var(--ink-3)">hospital / clinic dims</text>
+
+        <rect x="422" y="198" width="248" height="88" rx="5" fill="var(--surface)" stroke="var(--pine)"/>
+        <text x="546" y="220" text-anchor="middle" class="s" fill="var(--pine)">healthhmisFacts</text>
+        <text x="546" y="238" text-anchor="middle" class="s" fill="var(--ink-2)">visit · admission · billing</text>
+        <text x="546" y="254" text-anchor="middle" class="s" fill="var(--ink-2)">pathology · radiology · pharmacy</text>
+        <text x="546" y="270" text-anchor="middle" class="s" fill="var(--ink-3)">run_ct_job → Trino</text>
+
+        <line x1="686" y1="160" x2="724" y2="160" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+        <rect x="726" y="70" width="160" height="90" rx="7" fill="var(--cool-soft)" stroke="var(--cool)" stroke-width="1.6"/>
+        <text x="806" y="56" text-anchor="middle" class="l" fill="var(--cool)">ldr</text>
+        <text x="806" y="106" text-anchor="middle" class="s" fill="var(--ink-2)">hive.dp_semantic_stg</text>
+        <text x="806" y="124" text-anchor="middle" class="s" fill="var(--ink-3)">*_ld.sql copies</text>
+        <text x="806" y="142" text-anchor="middle" class="s" fill="var(--cool)">run_ld_job</text>
+
+        <line x1="886" y1="115" x2="924" y2="115" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+        <rect x="926" y="70" width="146" height="180" rx="7" fill="var(--cool-soft)" stroke="var(--cool)" stroke-width="1.6"/>
+        <text x="999" y="56" text-anchor="middle" class="l" fill="var(--cool)">Thin layer</text>
+        <text x="999" y="106" text-anchor="middle" class="s" fill="var(--ink)">healthhmisThinlayer</text>
+        <text x="999" y="128" text-anchor="middle" class="s" fill="var(--ink-2)">tl_health_hmis_*</text>
+        <text x="999" y="146" text-anchor="middle" class="s" fill="var(--ink-2)">visits · hospital</text>
+        <text x="999" y="164" text-anchor="middle" class="s" fill="var(--ink-2)">pharmacy · billing</text>
+        <text x="999" y="190" text-anchor="middle" class="s" fill="var(--cool)">ClickHouse</text>
+        <text x="999" y="208" text-anchor="middle" class="s" fill="var(--ink-3)">dp_semantic</text>
+        <text x="999" y="226" text-anchor="middle" class="s" fill="var(--ink-3)">run_sm_job</text>
+      </svg>
+      <figcaption>
+        Dataset outlets on each DAG let the next wave start when the previous batch closes — not when a cron happens to fire.
+        The same four-DAG split exists for Education, Finance, Agriculture, HED, Dastak, Livestock, Price, PIP, FDIP, CIS.
+      </figcaption>
+    </figure>
+
+    <div class="col">
+      <p>
+        Patient dimension SQL is the pattern in miniature. It <code>MERGE</code>s into
+        <code>delta_lake.:env_curated.health_patient_dim</code> from raw
+        <code>delta_lake.:env_health_hmiscentral_hmisv2centralproduction_raw.patients</code>,
+        joining <code>citizen_hlp</code> for the warehouse citizen key and location helpings
+        for division / district / tehsil. Placeholders survive in git; the runner rewrites them.
+      </p>
+    </div>
+
+<pre><code><span class="c">-- Jobs/Curated/dimensions/health_patient_dim/health_patient_dim.sql</span>
+<span class="h">MERGE INTO</span> delta_lake.:env_curated.health_patient_dim AS target
+USING (
+  SELECT DISTINCT
+    CAST(h.patient_key AS BIGINT) AS patient_key,
+    CAST(HLP.citizen_key AS BIGINT) AS citizen_key,
+    …
+    ':batch_id' AS batch_id,
+    'I' AS oper
+  FROM delta_lake.:env_health_hmiscentral_hmisv2centralproduction_raw.patients p
+  … join citizen_hlp, district / tehsil helpings
+) AS source
+ON target.patient_key = source.patient_key
+<span class="c">-- WHEN MATCHED / NOT MATCHED  →  SCD-lite overwrite of attributes</span></code></pre>
+
+    <div class="col">
+      <p>
+        Thin-layer SQL then lives on ClickHouse, not Trino. HED’s application thin layer
+        (same idea as HMIS <code>tl_health_hmis_*</code>) truncates
+        <code>:env_semantic.tl_hed_application_details</code>, inserts from the semantic fact,
+        and adds dashboard grain — program category buckets, patched location names — that a
+        BI tool should not recompute.
+      </p>
+    </div>
+  </section>
+
+  <!-- 06 flask -->
+  <section>
+    <div class="sec-head">
+      <span class="num">06</span>
+      <h2>Flask is a product plane, not the control plane</h2>
+    </div>
+    <div class="col">
+      <p>
+        Nothing under <code>Flask/</code> starts a batch or writes <code>task_metatable</code>.
+        Orchestration is Airflow + MySQL. Flask apps sit on the far side of ClickHouse (or a
+        local MySQL copy of location dims) and answer HTTP.
+      </p>
+    </div>
+    <div class="grid-2">
+      <div class="tier allow">
+        <h3>Assan Karobar Card API</h3>
+        <p>
+          <code>Flask/Assan_Karobar_Card_Api/main.py</code> — bearer-token POST
+          <code>/api/has_registered_business</code>. Reads ClickHouse view
+          <code>dp_ossp_integration.akc_pra_companies</code> (join of secure PRA fact and
+          <code>citizen_hlp</code>). Rate-limited. Gunicorn in non-local env. This is a
+          <em>consumer</em> of the semantic layer.
+        </p>
+      </div>
+      <div class="tier ask">
+        <h3>Location API</h3>
+        <p>
+          <code>LocationAPI</code> (session login, MD5 against <code>user_sign_in</code>) and
+          <code>LocationAPIPublic</code> serve division / district / tehsil reference data from
+          a MySQL schema <code>location_api</code>. Used to maintain the location hierarchy the
+          warehouse helpings also model — not to run ETL.
+        </p>
+      </div>
+    </div>
+    <div class="note" style="margin-top:18px; max-width:68ch">
+      <p class="hd">Where the real control plane is</p>
+      <p>
+        <code>commons/utilities.py</code> plus <code>configs/db_configs.py</code> (AES-wrapped
+        host maps for MySQL, Trino, ClickHouse, MinIO, and a handful of source DBs) plus
+        <code>configs/env_variables.py</code> (schema names, monitoring table names,
+        Great Expectations root, Spark/MySQL/Greenplum engine labels). Credentials are not
+        documented here.
+      </p>
+    </div>
+  </section>
+
+  <!-- 07 engines -->
+  <section>
+    <div class="sec-head">
+      <span class="num">07</span>
+      <h2>Trino, Delta, ClickHouse, MinIO</h2>
+    </div>
+    <div class="col">
+      <p>
+        Encrypted config keys in <code>ConfigManager</code> are the inventory of engines:
+        <code>mysql</code>, <code>mysqlweb</code>, <code>trino</code>, <code>clickhouse</code>,
+        <code>admin_clickhouse</code>, <code>minio</code>, plus source aliases
+        (<code>agri_smart</code>, <code>db_health</code>, <code>db_literacydrive</code>,
+        <code>tdas</code>, <code>fdip_clickhouse</code>). Hostnames in DAG comments point at
+        <code>ossp-trino-dev.pitb.gov.pk</code> and <code>ossp-trino-coordinator-prod.pitb.gov.pk</code>
+        on 8443, catalog <code>delta_lake</code>. ClickHouse is TLS on 9440.
+      </p>
+    </div>
+
+    <div class="t-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name in code</th>
+            <th>Role</th>
+            <th>Dev / prod split</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">delta_lake</td>
+            <td>Trino catalog over MinIO Delta. Raw + curated + most SQL.</td>
+            <td>Schema prefix <code>dd_</code> / <code>dp_</code></td>
+          </tr>
+          <tr>
+            <td class="num">delta_lake_secure</td>
+            <td>Same, for excise, citizen, PSER (and related) PII.</td>
+            <td>Same prefix rule</td>
+          </tr>
+          <tr>
+            <td class="num">hive.:env_semantic_stg</td>
+            <td>Semantic staging tables written by ldr jobs.</td>
+            <td><code>dd</code> / <code>dp</code> via <code>:env</code></td>
+          </tr>
+          <tr>
+            <td class="num">MinIO buckets</td>
+            <td>Parquet for ClickHouse <code>s3()</code> reads.</td>
+            <td><code>dd-semantic-stg</code> / <code>dp-semantic-stg</code> (+ <code>-secure</code>)</td>
+          </tr>
+          <tr>
+            <td class="num">ClickHouse</td>
+            <td>Serving. Thin layers, RBAC grants, Kafka landing, product APIs.</td>
+            <td><code>dd_semantic</code> / <code>dp_semantic</code> (+ <code>_secure</code>)</td>
+          </tr>
+          <tr>
+            <td class="num">Spark</td>
+            <td><code>hdfs_to_minIO.py</code> after Sqoop; Kafka Spark streaming variant.</td>
+            <td><code>sparkEngine</code> in env_variables</td>
+          </tr>
+          <tr>
+            <td class="num">dp_serving</td>
+            <td>Named in <code>env_variables['serving_db']</code>; not the path curated/semantic jobs use today.</td>
+            <td>Legacy / parallel label</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid-2" style="margin-top:22px">
+      <div class="note">
+        <p class="hd">SQL token rewrite</p>
+        <p>
+          <code>add_arguements</code> replaces <code>:start_date</code>, <code>:end_date</code>,
+          <code>:batch_id</code>, <code>:input_path</code>, <code>:table_name</code>, and
+          <code>:env</code> (<code>dd</code> or <code>dp</code>). That is why git SQL says
+          <code>delta_lake.:env_curated</code> and production runs
+          <code>delta_lake.dp_curated</code>.
+        </p>
+      </div>
+      <div class="note warn">
+        <p class="hd">Side engines</p>
+        <p>
+          Kafka consumers stream special-education topics toward ClickHouse.
+          <code>trino_to_clickhouse.py</code> and <code>create_clickhouse_table</code> map Trino types
+          to MergeTree. <code>Secure_Queries_Sync</code> copies Trino/ClickHouse query logs into
+          <code>secure_*_logs</code> tables. RBAC DAG generates <code>CREATE ROLE</code> / <code>GRANT</code>
+          for ClickHouse from a web-backend roles table.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 sectors -->
+  <section>
+    <div class="sec-head">
+      <span class="num">08</span>
+      <h2>What the warehouse actually covers</h2>
+    </div>
+    <div class="col">
+      <p>
+        Not a generic lake. Named government systems, each with a sourcing DAG and usually a
+        lookups / dimensions / facts / thin-layer quartet.
+      </p>
+    </div>
+    <div class="t-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Sector</th>
+            <th>Example DAGs</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Health</td>
+            <td>HMIS_Central, healthhmisLookups/Dimension/Facts/Thinlayer, HealthFacts, SchoolHealthNutritionSystem</td>
+            <td>Hadoop/Sqoop path still used for some health DBs.</td>
+          </tr>
+          <tr>
+            <td>Education / HED</td>
+            <td>EducationLookups/Dimensions/Facts, EduThinLayer, Hed*, OCAS, PEIMA, SpecialEducation, SIT 360 schools</td>
+            <td>Citizen + college dims shared with laptop scheme.</td>
+          </tr>
+          <tr>
+            <td>Agriculture</td>
+            <td>AgricultureLookups/Dimensions/Facts, AgriSmart, KissanCard*, GreenTractor*, WheatIncentive*, SolarTubewell*</td>
+            <td>Sqoop full-load for <code>agri_smart</code>.</td>
+          </tr>
+          <tr>
+            <td>Finance / tax</td>
+            <td>FinanceLookups/Dimensions/Facts/Thinlayer, Epay, Epay-Pra, MVRS, EauctionProduction, praApiIngestionDag, estampApiIngestionDag</td>
+            <td>Secure catalog; Assan Karobar API reads PRA fact.</td>
+          </tr>
+          <tr>
+            <td>Citizen / social</td>
+            <td>Citizen-Dimension, CitizenHub_Dimensions, Citizen-Thinlayer, PSER*, Dastak*, Zakat (SQL), FDIP*</td>
+            <td>Conformed citizen_key is the warehouse’s cross-sector join.</td>
+          </tr>
+          <tr>
+            <td>Transport / livestock / LG / price</td>
+            <td>TDAS facts in SQL, Livestock_*, PunjabTourism, Price*, Qeemat, BOS, PIP_*, LGCD e-construction SQL</td>
+            <td>Location hierarchy DAGs per department feed unified dims.</td>
+          </tr>
+          <tr>
+            <td>Platform ops</td>
+            <td>RBAC, catalog_mapping, Secure_Queries_Sync, DataServiceBus, APIs_ingestion, pipeline_dependecy_*</td>
+            <td>Not sector models — keep the platform running.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 09 repo -->
+  <section>
+    <div class="sec-head">
+      <span class="num">09</span>
+      <h2>Repository map</h2>
+    </div>
+    <div class="filemap">
+      <div class="frow">
+        <div class="path">Airflow/</div>
+        <div class="what"><b>One Python file per pipeline_id.</b> Template clones. Dataset-aware. ~180 modules.</div>
+      </div>
+      <div class="frow">
+        <div class="path">Jobs/</div>
+        <div class="what"><b>RAW · Curated · ldr · Semantic · sit.</b> Four runners do the work; SQL is the inventory.</div>
+      </div>
+      <div class="frow">
+        <div class="path">commons/</div>
+        <div class="what"><b>The kernel.</b> <code>utilities.py</code> (connections, CDC, Sqoop, API extract, batch mutex, Trino/ClickHouse exec). Job metadata class, DAG generator, RBAC, Kafka, retention, data dictionary, Hadoop-to-MinIO.</div>
+      </div>
+      <div class="frow">
+        <div class="path">configs/</div>
+        <div class="what"><b>Env names and encrypted hosts.</b> <code>env_variables.py</code> is safe to read. <code>db_configs.py</code> is not — ciphertext blobs per engine. Path to <code>configs.ini</code> is production-only.</div>
+      </div>
+      <div class="frow">
+        <div class="path">automation/</div>
+        <div class="what"><b>Onboarding and triggers.</b> CSV → ingestion metadata, DDL extraction, wait/place trigger shells, data service bus mailer, pipeline running flag.</div>
+      </div>
+      <div class="frow">
+        <div class="path">Flask/</div>
+        <div class="what"><b>HTTP products.</b> Location admin/public, Assan Karobar NTN check. Not ETL.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 decisions -->
+  <section>
+    <div class="sec-head">
+      <span class="num">10</span>
+      <h2>Decisions the code has already made</h2>
+    </div>
+    <div class="stack" style="display:flex;flex-direction:column;gap:14px">
+      <div class="note">
+        <h3>1. The graph lives in MySQL</h3>
+        <p>DAG Python is a renderer. Task order, types, and SQL arguments are <code>task_metatable</code> rows. That lets ops change a pipeline without a deploy — and makes the repo look repetitive on purpose.</p>
+      </div>
+      <div class="note">
+        <h3>2. Two engines, not one lakehouse query layer</h3>
+        <p>Trino owns Delta (model, MERGE, CDC). ClickHouse owns serving (thin layers, RBAC, APIs). Hive/MinIO parquet is the hand-off, not a third model.</p>
+      </div>
+      <div class="note">
+        <h3>3. Prefix, don’t fork catalogs</h3>
+        <p>Dev and prod share catalog names. <code>dd_</code> vs <code>dp_</code> (and <code>:env</code> in SQL) is the isolation. Same job code, different rewrite.</p>
+      </div>
+      <div class="note">
+        <h3>4. Secure is a catalog, not a column</h3>
+        <p>Citizen, excise/tax, PSER land in <code>delta_lake_secure</code> / <code>*_secure</code> schemas and MinIO buckets. Filename substring <code>secure</code> steers curated/semantic runners.</p>
+      </div>
+      <div class="note">
+        <h3>5. Thin layer is the BI contract</h3>
+        <p>Dashboards are not expected to star-join ClickHouse facts. <code>tl_*</code> tables are truncated and rebuilt with grain, labels, and exception logic (HED tehsil 150 patches, program_category buckets).</p>
+      </div>
+      <div class="note">
+        <h3>6. Conformed citizen is the cross-sector key</h3>
+        <p>Helpings and <code>citizen_hub</code> / <code>citizen</code> dims exist so Health, HED, livestock, zakat, ePay, PSER, and Dastak can share a person key without copying CNICs through every fact.</p>
+      </div>
+      <div class="note">
+        <h3>7. Batch mutex over Airflow pools</h3>
+        <p><code>pipeline_metadata.running</code> plus <code>max_active_runs: 1</code>. Backfill has a second table so a backfill cannot collide with the nightly run.</p>
+      </div>
+      <div class="note">
+        <h3>8. Sqoop remains for sources Trino cannot see</h3>
+        <p>Health Hadoop and selected agri/literacy DBs: Sqoop → HDFS → Spark → MinIO, then the same Delta raw tables. Not a second architecture — a source adapter.</p>
+      </div>
+      <div class="note warn">
+        <h3>9. Flask does not orchestrate</h3>
+        <p>Treat Location API and Assan Karobar as serving apps. Anyone looking for a “control API” will find MySQL metadata tables and Airflow instead.</p>
+      </div>
+      <div class="note warn">
+        <h3>10. README is not the architecture</h3>
+        <p>Root <code>README.md</code> is still the GitLab template. This page is derived from runners, DAG templates, config keys, and representative SQL — not from that file.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Derived from <code>ossp-data-platform-code</code> on disk. No credentials, tokens, or connection strings.
+      SQL dumps and <code>.venv</code> were not used; job counts are glob totals, not a catalog extract.
+    </p>
+    <p>PITB OSS Online Statistical System · on-prem lakehouse · flow.html</p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById("themeToggle");
+  var stored = null;
+  try { stored = localStorage.getItem("ossp-flow-theme"); } catch (e) {}
+  if (stored === "light" || stored === "dark") root.setAttribute("data-theme", stored);
+  function label() {
+    var t = root.getAttribute("data-theme");
+    if (t === "dark") btn.textContent = "Light";
+    else if (t === "light") btn.textContent = "Dark";
+    else btn.textContent = "Theme";
+  }
+  label();
+  btn.addEventListener("click", function () {
+    var cur = root.getAttribute("data-theme");
+    var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var next;
+    if (!cur) next = prefersDark ? "light" : "dark";
+    else next = cur === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("ossp-flow-theme", next); } catch (e) {}
+    label();
+  });
+})();
+</script>
+</body>
+</html>

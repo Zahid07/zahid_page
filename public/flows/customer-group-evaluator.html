@@ -1,0 +1,1361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Customer Group Evaluator</title>
+<meta name="description" content="How activate-customer-consumer-python evaluates Salla customer groups: Kafka in, MySQL conditions, ClickHouse membership, Kafka fan-out.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --paper:      #F1F3F2;
+    --surface:    #FAFBFA;
+    --surface-2:  #E7EBE9;
+    --ink:        #16201F;
+    --ink-2:      #3E4C4A;
+    --ink-3:      #6B7A77;
+    --rule:       #CFD8D5;
+    --rule-soft:  #DFE5E3;
+    --pine:       #0F6E63;
+    --pine-soft:  #DCEBE8;
+    --amber:      #9A5B00;
+    --amber-soft: #F5E8D2;
+    --oxide:      #9E2B18;
+    --oxide-soft: #F6DED9;
+    --shadow: 0 1px 2px rgba(22,32,31,.06), 0 8px 24px -12px rgba(22,32,31,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0E1413;
+      --surface:    #151D1C;
+      --surface-2:  #1E2827;
+      --ink:        #E4EAE8;
+      --ink-2:      #B0BEBB;
+      --ink-3:      #7F8F8C;
+      --rule:       #2C3937;
+      --rule-soft:  #222D2C;
+      --pine:       #5FC4B4;
+      --pine-soft:  #12312D;
+      --amber:      #D99A4E;
+      --amber-soft: #33240F;
+      --oxide:      #E08575;
+      --oxide-soft: #381914;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #0E1413;
+    --surface:    #151D1C;
+    --surface-2:  #1E2827;
+    --ink:        #E4EAE8;
+    --ink-2:      #B0BEBB;
+    --ink-3:      #7F8F8C;
+    --rule:       #2C3937;
+    --rule-soft:  #222D2C;
+    --pine:       #5FC4B4;
+    --pine-soft:  #12312D;
+    --amber:      #D99A4E;
+    --amber-soft: #33240F;
+    --oxide:      #E08575;
+    --oxide-soft: #381914;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 24px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  .col  { max-width: 68ch; }
+
+  h1, h2, h3, .label, .stage-n, th, .mono { font-family: "Archivo", "Helvetica Neue", Arial, sans-serif; }
+
+  h1 {
+    font-size: clamp(2.1rem, 5vw, 3.1rem);
+    font-weight: 700;
+    letter-spacing: -.025em;
+    line-height: 1.05;
+    text-wrap: balance;
+    margin: 0 0 .5rem;
+  }
+  h2 {
+    font-size: clamp(1.35rem, 2.4vw, 1.7rem);
+    font-weight: 600;
+    letter-spacing: -.015em;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h3 {
+    font-size: 1.02rem;
+    font-weight: 600;
+    letter-spacing: -.005em;
+    margin: 0 0 .4rem;
+  }
+  p { margin: 0 0 1.05rem; }
+  a { color: var(--pine); text-underline-offset: 3px; }
+  strong { font-weight: 600; }
+  em { font-style: italic; color: var(--ink-2); }
+
+  .label {
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .lede {
+    font-size: 1.16rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 60ch;
+  }
+
+  code, .mono, pre { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+  code {
+    font-size: .85em;
+    background: var(--surface-2);
+    padding: .12em .38em;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 6px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: .82rem;
+    line-height: 1.6;
+    margin: 0;
+    color: var(--ink-2);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  header.masthead {
+    padding: 72px 0 40px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .kicker {
+    display: flex; gap: 14px; align-items: baseline;
+    margin-bottom: 22px; flex-wrap: wrap;
+  }
+  .kicker .sep { color: var(--rule); }
+  .byline {
+    margin-top: 1.6rem;
+    display: flex; flex-wrap: wrap; gap: .45rem 1.3rem;
+    font-family: "JetBrains Mono", monospace;
+    font-size: .74rem;
+    color: var(--ink-3);
+  }
+  .byline span { display: inline-flex; align-items: center; gap: .4rem; }
+  .byline span::before {
+    content: ""; width: 5px; height: 5px;
+    background: var(--pine); border-radius: 50%; flex: none;
+  }
+
+  .theme-toggle {
+    position: absolute; top: 72px; right: 0;
+    font-family: "Archivo", sans-serif;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-3);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: .42em .7em;
+    cursor: pointer;
+  }
+  .theme-toggle:hover { border-color: var(--pine); color: var(--pine); }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--rule-soft); }
+  section:last-of-type { border-bottom: none; }
+  .sec-head { display: flex; gap: 18px; align-items: baseline; margin-bottom: 28px; }
+  .sec-head .num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; font-weight: 700;
+    color: var(--pine);
+    padding-top: .35em;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+
+  .pipeline { display: flex; flex-direction: column; gap: 0; margin-top: 8px; }
+  .stage {
+    display: grid;
+    grid-template-columns: 58px 1fr;
+    gap: 22px;
+    position: relative;
+    padding: 22px 0;
+  }
+  .stage:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: 28px; top: 56px; bottom: -6px;
+    width: 2px;
+    background: linear-gradient(var(--rule), var(--rule-soft));
+  }
+  .stage-n {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--surface);
+    border: 2px solid var(--rule);
+    font-size: .82rem; font-weight: 700;
+    color: var(--ink-2);
+    position: relative; z-index: 1;
+  }
+  .stage.this .stage-n { border-color: var(--pine); color: var(--pine); }
+  .stage.up .stage-n { border-color: var(--amber); color: var(--amber); }
+  .stage.down .stage-n { border-color: var(--ink-3); color: var(--ink-3); }
+
+  .stage-body { padding-top: 4px; min-width: 0; }
+  .stage-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  .stage-body p { margin-bottom: .7rem; max-width: 62ch; }
+
+  .chip {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .64rem; font-weight: 500;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: .25em .6em; border-radius: 3px;
+    white-space: nowrap;
+  }
+  .chip.this  { background: var(--pine-soft); color: var(--pine); }
+  .chip.up    { background: var(--amber-soft); color: var(--amber); }
+  .chip.down  { background: var(--surface-2); color: var(--ink-3); }
+
+  .gate {
+    border-left: 3px solid var(--oxide);
+    background: var(--oxide-soft);
+    padding: 10px 14px;
+    border-radius: 0 4px 4px 0;
+    font-size: .9rem;
+    color: var(--ink);
+    max-width: 62ch;
+  }
+  .gate .label { color: var(--oxide); display: block; margin-bottom: 2px; }
+  .gate.ok { border-left-color: var(--pine); background: var(--pine-soft); }
+  .gate.ok .label { color: var(--pine); }
+  .gate.warn { border-left-color: var(--amber); background: var(--amber-soft); }
+  .gate.warn .label { color: var(--amber); }
+
+  .t-wrap { overflow-x: auto; border: 1px solid var(--rule-soft); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th {
+    text-align: left;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { color: var(--ink); }
+  td.num { font-family: "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+
+  .filemap {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .frow {
+    display: grid;
+    grid-template-columns: minmax(220px, 280px) 1fr;
+    gap: 20px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--rule-soft);
+    align-items: baseline;
+  }
+  .frow:last-child { border-bottom: none; }
+  .frow .path {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .78rem;
+    color: var(--pine);
+    word-break: break-word;
+  }
+  .frow .what { font-size: .93rem; color: var(--ink-2); }
+  .frow .what b { color: var(--ink); font-weight: 600; }
+
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--pine);
+    border-radius: 0 6px 6px 0;
+    padding: 16px 20px;
+    max-width: 66ch;
+  }
+  .note.warn { border-left-color: var(--amber); }
+  .note.stop { border-left-color: var(--oxide); }
+  .note p:last-child { margin-bottom: 0; }
+  .note .hd {
+    font-family: "Archivo", sans-serif;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--pine);
+    margin: 0 0 .4rem;
+  }
+  .note.warn .hd { color: var(--amber); }
+  .note.stop .hd { color: var(--oxide); }
+
+  figure {
+    margin: 1.9rem 0 1rem;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 1.5rem 1.3rem 1.1rem;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  figcaption {
+    font-family: "Archivo", sans-serif;
+    font-size: .75rem;
+    color: var(--ink-3);
+    margin-top: 1rem;
+    padding-top: .85rem;
+    border-top: 1px solid var(--rule);
+    line-height: 1.5;
+  }
+  figcaption b { color: var(--ink); font-weight: 600; }
+  svg { display: block; max-width: 100%; height: auto; }
+  .l { font-family: "Archivo", sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .m { font-family: "JetBrains Mono", monospace; font-size: 11px; }
+  .s { font-family: "JetBrains Mono", monospace; font-size: 10px; }
+
+  .tier {
+    border: 1px solid var(--rule);
+    border-top-width: 3px;
+    border-radius: 6px;
+    padding: 16px 18px;
+    background: var(--surface);
+  }
+  .tier.own { border-top-color: var(--pine); }
+  .tier.read { border-top-color: var(--amber); }
+  .tier.out { border-top-color: var(--ink-3); }
+  .tier ul { margin: 0; padding-left: 1.1em; font-size: .88rem; color: var(--ink-2); }
+  .tier li { margin-bottom: 5px; }
+
+  ul.plain { margin: 0 0 1.05rem; padding-left: 1.25rem; }
+  ul.plain li { margin-bottom: .4rem; }
+
+  footer {
+    padding-top: 40px;
+    color: var(--ink-3);
+    font-size: .88rem;
+    border-top: 1px solid var(--rule-soft);
+    margin-top: 20px;
+  }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; padding: 0 18px 64px; }
+    .stage { grid-template-columns: 40px 1fr; gap: 16px; }
+    .stage-n { width: 40px; height: 40px; font-size: .72rem; }
+    .stage:not(:last-child)::after { left: 19px; top: 42px; }
+    .frow { grid-template-columns: 1fr; gap: 4px; }
+    .sec-head { gap: 12px; }
+    .theme-toggle { position: static; margin-bottom: 1.2rem; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: opacity .15s ease; }
+    a:hover { opacity: .75; }
+  }
+  :focus-visible { outline: 2px solid var(--pine); outline-offset: 2px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">Theme</button>
+    <div class="kicker">
+      <span class="label">activate-customer-consumer-python</span>
+      <span class="sep">/</span>
+      <span class="label">Customer Group Evaluator</span>
+    </div>
+    <h1>How a queued group<br>becomes membership</h1>
+    <p class="lede">
+      A Python Kafka consumer that turns one <code>group_id</code> into a ClickHouse
+      WHERE clause, a matched/unmatched delta, and three Kafka streams. It evaluates.
+      It does not write the sinks.
+    </p>
+    <div class="byline">
+      <span>Python 3.12</span>
+      <span>confluent-kafka</span>
+      <span>MySQL 8 · ClickHouse</span>
+      <span>Kafka fan-out × 3</span>
+    </div>
+  </header>
+
+  <!-- 01 shape -->
+  <section>
+    <div class="sec-head">
+      <span class="num">01</span>
+      <h2>The shape of the system</h2>
+    </div>
+    <div class="col">
+      <p>
+        Merchants define automatic customer groups as a set of conditions in MySQL
+        (<code>salla.groups</code> + <code>salla.customer_group_conditions</code>).
+        When a group is eligible, a Timeplus materialized view emits a Kafka event
+        carrying only a <code>group_id</code>. This service consumes that event,
+        compiles the conditions into ClickHouse SQL, scores every customer in the
+        store against the current profile, and publishes the <em>delta</em> —
+        who should join, who should leave, and that the group is now <code>active</code>.
+      </p>
+      <p>
+        The repository logger calls itself <code>evaluation-syncer</code>.
+        Architecture docs call it <code>group-evaluation-consumer-python</code>.
+        The image is <code>data/activate-customer-consumer-python</code>.
+        Same process.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 420" role="img" aria-label="End-to-end landscape from Timeplus trigger through this consumer to three Kafka sinks">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <!-- upstream -->
+        <rect x="8" y="28" width="200" height="86" rx="7" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="1.6"/>
+        <text x="108" y="52" text-anchor="middle" class="l" fill="var(--amber)">Timeplus MV</text>
+        <text x="108" y="74" text-anchor="middle" class="s" fill="var(--ink-2)">mv_k_tp_groups_</text>
+        <text x="108" y="88" text-anchor="middle" class="s" fill="var(--ink-2)">customer_groups_trigger_v2</text>
+        <text x="108" y="106" text-anchor="middle" class="s" fill="var(--amber)">not expired · status=queue</text>
+
+        <line x1="208" y1="71" x2="246" y2="71" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <rect x="248" y="28" width="168" height="86" rx="7" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="332" y="56" text-anchor="middle" class="l" fill="var(--ink)">Kafka input</text>
+        <text x="332" y="78" text-anchor="middle" class="s" fill="var(--ink-2)">KAFKA_TOPICS</text>
+        <text x="332" y="96" text-anchor="middle" class="s" fill="var(--ink-3)">{ group_id }</text>
+
+        <line x1="416" y1="71" x2="454" y2="71" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <!-- this service -->
+        <rect x="456" y="12" width="280" height="248" rx="8" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+        <text x="596" y="36" text-anchor="middle" class="l" fill="var(--pine)">This service</text>
+        <text x="596" y="54" text-anchor="middle" class="m" fill="var(--ink)">consumer.py</text>
+
+        <rect x="472" y="68" width="248" height="36" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="596" y="91" text-anchor="middle" class="s" fill="var(--ink)">ThreadPool · process_group(id)</text>
+
+        <rect x="472" y="112" width="248" height="36" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="596" y="135" text-anchor="middle" class="s" fill="var(--ink)">MySQL conditions → WHERE SQL</text>
+
+        <rect x="472" y="156" width="248" height="36" rx="5" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="596" y="179" text-anchor="middle" class="s" fill="var(--ink)">ClickHouse matched / unmatched</text>
+
+        <rect x="472" y="200" width="248" height="44" rx="5" fill="var(--surface)" stroke="var(--pine)"/>
+        <text x="596" y="218" text-anchor="middle" class="s" fill="var(--pine)">GroupAssignmentService</text>
+        <text x="596" y="234" text-anchor="middle" class="s" fill="var(--ink-3)">produce · poll(0) · flush</text>
+
+        <!-- reads -->
+        <rect x="248" y="196" width="168" height="64" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="332" y="220" text-anchor="middle" class="l" fill="var(--ink)">MySQL</text>
+        <text x="332" y="240" text-anchor="middle" class="s" fill="var(--ink-3)">groups · conditions</text>
+        <text x="332" y="254" text-anchor="middle" class="s" fill="var(--ink-3)">condition_relationships</text>
+        <line x1="416" y1="220" x2="456" y2="150" stroke="var(--ink-3)" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+
+        <rect x="248" y="280" width="168" height="64" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="332" y="304" text-anchor="middle" class="l" fill="var(--ink)">ClickHouse</text>
+        <text x="332" y="324" text-anchor="middle" class="s" fill="var(--ink-3)">customer_profile</text>
+        <text x="332" y="338" text-anchor="middle" class="s" fill="var(--ink-3)">+ customer_groups_v2</text>
+        <line x1="416" y1="300" x2="456" y2="180" stroke="var(--ink-3)" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+
+        <!-- outputs -->
+        <line x1="736" y1="80" x2="780" y2="52" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="736" y1="130" x2="780" y2="150" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="736" y1="200" x2="780" y2="248" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <rect x="782" y="16" width="286" height="72" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="925" y="40" text-anchor="middle" class="l" fill="var(--ink)">OpenSearch topic</text>
+        <text x="925" y="58" text-anchor="middle" class="s" fill="var(--ink-3)">auto_groups upsert · matched only</text>
+        <text x="925" y="76" text-anchor="middle" class="s" fill="var(--pine)">OpenSearch indexer</text>
+
+        <rect x="782" y="114" width="286" height="72" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="925" y="138" text-anchor="middle" class="l" fill="var(--ink)">MySQL-sync topic</text>
+        <text x="925" y="156" text-anchor="middle" class="s" fill="var(--ink-3)">customer_groups_v2 upsert / delete</text>
+        <text x="925" y="174" text-anchor="middle" class="s" fill="var(--pine)">mysql_kafka_sink_connector</text>
+
+        <rect x="782" y="212" width="286" height="72" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="925" y="236" text-anchor="middle" class="l" fill="var(--ink)">Active-group topic</text>
+        <text x="925" y="254" text-anchor="middle" class="s" fill="var(--ink-3)">salla.groups.status = active</text>
+        <text x="925" y="272" text-anchor="middle" class="s" fill="var(--pine)">mysql-sink-connector-python</text>
+
+        <text x="8" y="390" class="s" fill="var(--ink-3)">Eligibility lives in Timeplus. This process never checks expired_at or status=queue. If the event arrived, it evaluates.</text>
+        <text x="8" y="408" class="s" fill="var(--ink-3)">Dashed arrows are reads. Solid arrows are events. Sinks are other repositories.</text>
+      </svg>
+      <figcaption>
+        <b>Ownership is the seam.</b> This service owns evaluation and Kafka publishing.
+        <code>mysql_kafka_sink_connector</code> writes <code>customer_groups_v2</code>.
+        An OpenSearch indexer patches customer documents.
+        <code>mysql-sink-connector-python</code> applies the group status row.
+      </figcaption>
+    </figure>
+
+    <div class="grid-3" style="margin-top:8px">
+      <div class="tier own">
+        <h3>This service owns</h3>
+        <ul>
+          <li>Consume <code>group_id</code> events</li>
+          <li>Compile conditions → ClickHouse SQL</li>
+          <li>Score matched / unmatched deltas</li>
+          <li>Publish three Kafka topics</li>
+        </ul>
+      </div>
+      <div class="tier read">
+        <h3>It reads, never writes</h3>
+        <ul>
+          <li>MySQL <code>salla.groups</code></li>
+          <li>MySQL <code>customer_group_conditions</code></li>
+          <li>MySQL <code>condition_relationships</code></li>
+          <li>ClickHouse profiles + current membership</li>
+        </ul>
+      </div>
+      <div class="tier out">
+        <h3>Sinks own the writes</h3>
+        <ul>
+          <li>MySQL <code>customer_groups_v2</code></li>
+          <li>OpenSearch <code>auto_groups</code></li>
+          <li>MySQL <code>groups.status</code></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 02 flow -->
+  <section>
+    <div class="sec-head">
+      <span class="num">02</span>
+      <h2>The flow, end to end</h2>
+    </div>
+    <div class="col">
+      <p>
+        Eight stages. The first two happen before this process wakes up.
+        The last happens after it has flushed. Everything in the middle is
+        <code>process_group</code>.
+      </p>
+    </div>
+
+    <div class="pipeline">
+
+      <div class="stage up">
+        <div class="stage-n">01</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Timeplus decides eligibility</h3>
+            <span class="chip up">upstream · not this repo</span>
+          </div>
+          <p>
+            Materialized view <code>mv_k_tp_groups_customer_groups_trigger_v2</code>
+            emits only when the group is <strong>not expired</strong> and
+            <code>status = queue</code>. A group that is already active, deleted,
+            or past <code>expired_at</code> never becomes a Kafka message.
+          </p>
+          <div class="gate ok">
+            <span class="label">Boundary</span>
+            This consumer does not re-check those predicates. An arriving
+            <code>group_id</code> is treated as authorized work.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage up">
+        <div class="stage-n">02</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Kafka input</h3>
+            <span class="chip up">topic from env</span>
+          </div>
+          <p>
+            <code>consumer.py</code> reads <code>KAFKA_TOPICS</code> (plural).
+            If unset, it falls back to
+            <code>prod.opensearch_customers.customer_groups_groups_trigger_v2</code>.
+            Each message is JSON with an integer <code>group_id</code>.
+            Offsets reset to <code>latest</code>; auto-commit is off.
+          </p>
+          <div class="gate warn">
+            <span class="label">Env name</span>
+            README and <code>.env.example</code> document <code>KAFKA_TOPIC</code>.
+            The running consumer reads <code>KAFKA_TOPICS</code>.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage this">
+        <div class="stage-n">03</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Worker pool</h3>
+            <span class="chip this">this service</span>
+          </div>
+          <p>
+            A <code>ThreadPoolExecutor</code> with
+            <code>EXPORTER_HANDLER_BATCH_CHUNK_SIZE</code> workers (default 5)
+            runs <code>process_group</code> in parallel. In-flight is capped at
+            <code>KAFKA_MAX_IN_FLIGHT</code> (default <code>CHUNK_SIZE × 2</code>):
+            when the map is full, polling pauses. A <code>group_id</code> already
+            in the map is skipped and its duplicate offset is committed.
+          </p>
+          <p>
+            The offset of a message is committed on the main thread only after
+            that group’s future is done — success or exception.
+            SIGINT / SIGTERM set <code>running = False</code>, drain in-flight
+            workers (300s timeout each), commit, then close.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage this">
+        <div class="stage-n">04</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Fetch definition from MySQL</h3>
+            <span class="chip this">read</span>
+          </div>
+          <p>
+            Three queries, three connections (connect / cursor / close each time):
+          </p>
+          <ul class="plain">
+            <li><code>salla.groups</code> by id, <code>deleted_at IS NULL</code> — takes <code>store_id</code> and <code>operator_type</code></li>
+            <li><code>salla.customer_group_conditions</code> for the group, not deleted, <code>type != ''</code>, ordered by id</li>
+            <li><code>condition_relationships</code> where <code>deleted = 0</code> — keyed by <code>condition_name</code></li>
+          </ul>
+          <p>
+            If the group row has no <code>store_id</code>, customer scoring is skipped
+            and nothing is published. Query SQL is overridable via
+            <code>MYSQL_GROUP_QUERY</code> and <code>MYSQL_GROUP_CONDITIONS_QUERY</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage this">
+        <div class="stage-n">05</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Compile a WHERE clause</h3>
+            <span class="chip this">QueryGeneratorService</span>
+          </div>
+          <p>
+            Related condition types are grouped first (payment method with returned
+            orders; purchased product with days-since-purchase). Standalone conditions
+            become fragments. Fragments are joined by <code>operator_type</code>.
+            Empty condition lists compile to <code>1 = 0</code> — match nobody.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage this">
+        <div class="stage-n">06</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Score in ClickHouse — as a delta</h3>
+            <span class="chip this">not a full recompute</span>
+          </div>
+          <p>
+            Both queries join <code>customer_profile.customer_profile</code>
+            (AggregatingMergeTree-style <code>maxMerge</code> / <code>sumMerge</code>)
+            to <code>customer_profile_extended</code> (<code>argMax(..., _ver)</code>),
+            filtered to the store. Then they consult
+            <code>local_salla.customer_groups_v2 FINAL</code> for the current group:
+          </p>
+          <ul class="plain">
+            <li><strong>Matched</strong> — satisfies WHERE <em>and is not already in the group</em> → assign</li>
+            <li><strong>Unmatched</strong> — fails WHERE <em>and is already in the group</em> → delete</li>
+          </ul>
+          <div class="gate ok">
+            <span class="label">Why this is cheap</span>
+            Customers already correctly in (or out of) the group produce no event.
+            Re-evaluating a stable group is a no-op at the sink.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage this">
+        <div class="stage-n">07</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Fan-out to three topics</h3>
+            <span class="chip this">GroupAssignmentService</span>
+          </div>
+          <p>
+            One producer. Per matched customer: an OpenSearch upsert and a MySQL-sync
+            upsert. Per unmatched customer: a MySQL-sync delete only — OpenSearch is
+            not told about leavers. Then one status message sets
+            <code>salla.groups.status</code> to <code>active</code>.
+            <code>flush(30)</code> before return.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage down">
+        <div class="stage-n">08</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Connectors write the systems of record</h3>
+            <span class="chip down">downstream · not this repo</span>
+          </div>
+          <p>
+            <code>mysql_kafka_sink_connector</code> upserts and deletes
+            <code>salla.customer_groups_v2</code>. The OpenSearch indexer patches
+            <code>auto_groups</code> on the customer document.
+            <code>mysql-sink-connector-python</code> applies the group status update
+            so the group leaves the <code>queue</code> state that Timeplus watches.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 03 consumer -->
+  <section>
+    <div class="sec-head">
+      <span class="num">03</span>
+      <h2>How the consumer loop actually runs</h2>
+    </div>
+    <div class="col">
+      <p>
+        The loop is a single thread that polls, submits, and commits.
+        Workers never touch the consumer. That split is why shutdown can drain
+        without committing an unfinished group.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 310" role="img" aria-label="Consumer loop: poll, skip, submit, commit on the main thread">
+        <defs>
+          <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="10" y="36" width="150" height="70" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="85" y="64" text-anchor="middle" class="l" fill="var(--ink)">poll(1.0)</text>
+        <text x="85" y="84" text-anchor="middle" class="s" fill="var(--ink-3)">unless at MAX_IN_FLIGHT</text>
+        <line x1="160" y1="71" x2="196" y2="71" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr2)"/>
+
+        <rect x="198" y="36" width="168" height="70" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="282" y="64" text-anchor="middle" class="l" fill="var(--ink)">parse JSON</text>
+        <text x="282" y="84" text-anchor="middle" class="s" fill="var(--ink-3)">int(group_id)</text>
+        <line x1="366" y1="71" x2="402" y2="71" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr2)"/>
+
+        <rect x="404" y="20" width="200" height="102" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="504" y="48" text-anchor="middle" class="l" fill="var(--amber)">gates</text>
+        <text x="504" y="70" text-anchor="middle" class="s" fill="var(--ink)">bad JSON → commit, skip</text>
+        <text x="504" y="86" text-anchor="middle" class="s" fill="var(--ink)">group_id ≤ 0 → commit, skip</text>
+        <text x="504" y="102" text-anchor="middle" class="s" fill="var(--ink)">already in-flight → commit, skip</text>
+        <line x1="604" y1="71" x2="640" y2="71" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr2)"/>
+
+        <rect x="642" y="36" width="200" height="70" rx="6" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="1.6"/>
+        <text x="742" y="64" text-anchor="middle" class="l" fill="var(--pine)">submit process_group</text>
+        <text x="742" y="84" text-anchor="middle" class="s" fill="var(--ink-3)">keep (Future, message)</text>
+        <line x1="842" y1="71" x2="878" y2="71" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr2)"/>
+
+        <rect x="880" y="36" width="188" height="70" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="974" y="64" text-anchor="middle" class="l" fill="var(--pine)">commit when done</text>
+        <text x="974" y="84" text-anchor="middle" class="s" fill="var(--ink-3)">main thread only</text>
+
+        <text x="10" y="160" class="l" fill="var(--ink-3)">Security</text>
+        <rect x="10" y="172" width="520" height="54" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="24" y="196" class="s" fill="var(--ink)">WORKER_ENV in {production, stage} → SASL_SSL + SCRAM-SHA-512</text>
+        <text x="24" y="212" class="s" fill="var(--ink-3)">otherwise PLAINTEXT. Same gate on the producer.</text>
+
+        <rect x="548" y="172" width="520" height="54" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="562" y="196" class="s" fill="var(--ink)">SLEEP_BETWEEN_CHUNKS is loaded and never used</text>
+        <text x="562" y="212" class="s" fill="var(--ink-3)">back-pressure is MAX_IN_FLIGHT, not a sleep between batches</text>
+
+        <text x="10" y="262" class="s" fill="var(--ink-3)">Producer (assignment): linger.ms=100, batch.size=16384, connections.max.idle.ms=540000 (under the AWS MSK 10-minute idle drop),</text>
+        <text x="10" y="278" class="s" fill="var(--ink-3)">message.send.max.retries=10, request.timeout.ms=30000. Delivery failures are logged in on_delivery; produce errors raise.</text>
+        <text x="10" y="294" class="s" fill="var(--ink-3)">CLI path: python executors/consumer_executor.py --group-id N  ·  or --message JSON  ·  or JSON on stdin.</text>
+      </svg>
+      <figcaption>
+        <b>A skipped duplicate is still committed.</b> The next poll will not see it again.
+        That is intentional: the in-flight worker is already the evaluation for that group.
+        A poison payload (unparseable JSON, missing id) is also committed, so it cannot stall the partition.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- 04 process_group -->
+  <section>
+    <div class="sec-head">
+      <span class="num">04</span>
+      <h2>One group, inside process_group</h2>
+    </div>
+    <div class="col">
+      <p>
+        <code>executors/consumer_executor.py</code> is both the worker body and a
+        CLI. Services are constructed from the environment on every call —
+        a new MySQL connection set, a new ClickHouse client, a new Kafka producer —
+        then discarded.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 240" role="img" aria-label="Six steps inside process_group">
+        <defs>
+          <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="8" y="40" width="160" height="88" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="88" y="68" text-anchor="middle" class="l" fill="var(--ink)">1 · Group</text>
+        <text x="88" y="90" text-anchor="middle" class="s" fill="var(--ink-3)">store_id</text>
+        <text x="88" y="106" text-anchor="middle" class="s" fill="var(--ink-3)">operator_type</text>
+        <line x1="168" y1="84" x2="196" y2="84" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+        <rect x="198" y="40" width="160" height="88" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="278" y="68" text-anchor="middle" class="l" fill="var(--ink)">2 · Conditions</text>
+        <text x="278" y="90" text-anchor="middle" class="s" fill="var(--ink-3)">type · symbol · value</text>
+        <text x="278" y="106" text-anchor="middle" class="s" fill="var(--ink-3)">+ relationships map</text>
+        <line x1="358" y1="84" x2="386" y2="84" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+        <rect x="388" y="40" width="168" height="88" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="472" y="68" text-anchor="middle" class="l" fill="var(--pine)">3 · WHERE</text>
+        <text x="472" y="90" text-anchor="middle" class="s" fill="var(--ink-3)">fragments + %s params</text>
+        <text x="472" y="106" text-anchor="middle" class="s" fill="var(--ink-3)">AND / OR / NOT</text>
+        <line x1="556" y1="84" x2="584" y2="84" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+        <rect x="586" y="28" width="176" height="112" rx="6" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="1.6"/>
+        <text x="674" y="56" text-anchor="middle" class="l" fill="var(--pine)">4 · ClickHouse</text>
+        <text x="674" y="78" text-anchor="middle" class="s" fill="var(--ink)">matched = WHERE ∧ ∉ group</text>
+        <text x="674" y="96" text-anchor="middle" class="s" fill="var(--ink)">unmatched = ¬WHERE ∧ ∈ group</text>
+        <text x="674" y="118" text-anchor="middle" class="s" fill="var(--ink-3)">{store_id, customer_id}</text>
+        <line x1="762" y1="84" x2="790" y2="84" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+        <rect x="792" y="28" width="276" height="112" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="930" y="56" text-anchor="middle" class="l" fill="var(--amber)">5 · Produce, then 6 · flush</text>
+        <text x="930" y="78" text-anchor="middle" class="s" fill="var(--ink)">send_assignments(matched)</text>
+        <text x="930" y="94" text-anchor="middle" class="s" fill="var(--ink)">send_deletions(unmatched)</text>
+        <text x="930" y="110" text-anchor="middle" class="s" fill="var(--ink)">send_group_status_update</text>
+        <text x="930" y="126" text-anchor="middle" class="s" fill="var(--ink-3)">status → active, always</text>
+      </svg>
+      <figcaption>
+        <b>Status is published even when both lists are empty.</b>
+        A group whose membership did not change still leaves <code>queue</code>
+        and becomes <code>active</code>. That is how Timeplus stops re-triggering it.
+      </figcaption>
+    </figure>
+
+    <div class="note warn" style="margin-top:8px">
+      <p class="hd">Default operator_type in the executor</p>
+      <p>
+        Before the group row is read, <code>operator_type</code> is set to <code>2</code>.
+        In <code>OperatorType</code> that is <strong>UNION</strong> (OR).
+        The MySQL column default, and <code>QueryGeneratorService.generate_where_clause</code>’s
+        own default, is <code>1</code> — <strong>INTERSECT</strong> (AND).
+        The executor default only applies when the row is missing
+        <code>operator_type</code>; a normal row uses the stored value.
+      </p>
+    </div>
+  </section>
+
+  <!-- 05 SQL compiler -->
+  <section>
+    <div class="sec-head">
+      <span class="num">05</span>
+      <h2>Conditions become SQL</h2>
+    </div>
+    <div class="col">
+      <p>
+        <code>QueryGeneratorService</code> is a compiler.
+        <code>ConditionRelationshipResolver</code> is the first pass:
+        if a condition’s type is a key in <code>condition_relationships</code>
+        and at least one partner type is also on the group, those rows become a
+        <code>RelatedConditionSet</code> (<code>intersect</code> or <code>union</code>).
+        Everyone else is standalone.
+      </p>
+    </div>
+
+    <div class="t-wrap" style="margin-top:4px">
+      <table>
+        <thead>
+          <tr>
+            <th>operator_type</th>
+            <th class="num">Int</th>
+            <th>Join</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>INTERSECT</code></td>
+            <td class="num">1</td>
+            <td>Fragments joined with <code>AND</code>. Schema default. README numbers this as UNION — the enum and the MySQL column comment are the source of truth.</td>
+          </tr>
+          <tr>
+            <td><code>UNION</code></td>
+            <td class="num">2</td>
+            <td>Fragments joined with <code>OR</code>.</td>
+          </tr>
+          <tr>
+            <td><code>DIFFERENCE</code></td>
+            <td class="num">3</td>
+            <td>First fragment <code>AND NOT</code> (OR of the rest). A single fragment is kept as-is.</td>
+          </tr>
+          <tr>
+            <td><code>COMPLEMENT</code></td>
+            <td class="num">4</td>
+            <td><code>NOT (</code> fragments joined with <code>OR</code> <code>)</code>.</td>
+          </tr>
+          <tr>
+            <td>anything else</td>
+            <td class="num">—</td>
+            <td><code>_normalize_operator_type</code> falls back to INTERSECT.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col" style="margin-top:28px">
+      <h3>Related sets the builder knows by name</h3>
+      <p>
+        Unknown combinations fall back to independently built fragments joined
+        with <code>AND</code> or <code>OR</code> according to the relationship type.
+        Two combinations have dedicated SQL so the old Python evaluator’s semantics survive:
+      </p>
+    </div>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr><th>Pair</th><th>SQL shape</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>payment_method</code> ∩ <code>payment_returned_orders</code></td>
+            <td>
+              <code>has(payment_methods, …)</code> for each method,
+              <strong>and</strong> the sum of
+              <code>toFloat64(payment_method_returned_orders[method])</code>
+              compared to the returned-orders threshold.
+              Seeded in <code>scripts/mysql-init.sql</code>.
+            </td>
+          </tr>
+          <tr>
+            <td><code>purchased_product</code> ∩/∪ <code>product_purchased_days</code></td>
+            <td>
+              Presence via <code>mapContains(product_last_purchases, toUInt64(id))</code>,
+              then <code>least</code> (intersect — all products within N days) or
+              <code>greatest</code> (union — any product within N days) of
+              <code>dateDiff('day', …)</code>.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col" style="margin-top:28px">
+      <h3>Standalone fragment kinds</h3>
+      <p>
+        <code>ConditionFragmentBuilder</code> maps condition <code>type</code> to a
+        profile column, then <code>symbol</code> to a SQL operator. Empty values
+        become <code>0</code> before specialized builders run.
+        Placeholders are <code>%s</code>, bound later by <code>clickhouse_connect</code>.
+      </p>
+    </div>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr><th>Condition type</th><th>Becomes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Numeric / scalar columns</td><td><code>total_sales</code> → <code>sales_total</code>, <code>total_orders</code> → <code>sales_count</code>, <code>have_cancelled_orders</code> → <code>canceled_orders_count</code>, plus city, country, gender, dates, <code>returned_orders</code>.</td></tr>
+          <tr><td><code>*_days</code></td><td><code>dateDiff('day', toDateTime(column), now())</code> after mapping <code>birthday_days</code> / <code>joining_date_days</code> to the base timestamp column.</td></tr>
+          <tr><td><code>payment_method</code></td><td>Array membership: <code>has(payment_methods, %s)</code> (OR of positives, AND of negatives).</td></tr>
+          <tr><td><code>source</code></td><td><code>mapContains(source, %s)</code> on the minMap-merged source map.</td></tr>
+          <tr><td><code>purchased_product</code></td><td><code>mapContains(product_last_purchases, toUInt64(%s))</code>.</td></tr>
+          <tr><td><code>product_purchased_days</code> / <code>_date</code></td><td>Map contains that product <em>and</em> a comparison on the map value (days since, or datetime).</td></tr>
+          <tr><td><code>payment_returned_orders</code></td><td>If the first token is non-numeric, scoped to that payment method; otherwise <code>arraySum(mapValues(...))</code>.</td></tr>
+          <tr><td><code>abandoned_cart_days</code> / <code>_hours</code></td><td><code>dateDiff</code> on <code>abandoned_cart_time</code>, non-null. Comparison symbols are inverted (<code>&gt;</code> ↔ <code>&lt;</code>) before the numeric build.</td></tr>
+          <tr><td><code>doesnt_have_orders</code></td><td><code>(sales_count IS NULL OR sales_count = 0)</code>.</td></tr>
+          <tr><td><code>store_rating</code></td><td>A <code>CASE</code> of <code>store_rating_sum / store_rating_count</code>, zero when count is missing or zero.</td></tr>
+          <tr><td><code>doesnt_have_email</code></td><td>Column <code>email</code> with the requested symbol (typically null checks).</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 06 delta -->
+  <section>
+    <div class="sec-head">
+      <span class="num">06</span>
+      <h2>The ClickHouse delta</h2>
+    </div>
+    <div class="col">
+      <p>
+        The profile side is the same CTE in both queries: extended fields
+        rolled up by <code>argMax(..., _ver)</code> for the store, then a
+        <code>LEFT JOIN</code> onto the aggregating customer_profile grouped by
+        <code>(store_id, customer_id)</code>. What differs is the outer
+        <code>WHERE</code> and the membership subquery against
+        <code>local_salla.customer_groups_v2</code>.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 300" role="img" aria-label="Matched and unmatched as a set difference against current membership">
+        <rect x="20" y="36" width="500" height="220" rx="8" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="40" y="64" class="l" fill="var(--ink-3)">All profiles in the store</text>
+        <ellipse cx="270" cy="168" rx="180" ry="70" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="1.6"/>
+        <text x="270" y="162" text-anchor="middle" class="l" fill="var(--pine)">Satisfies WHERE</text>
+        <text x="270" y="180" text-anchor="middle" class="s" fill="var(--ink-3)">condition compiler output</text>
+
+        <rect x="580" y="36" width="480" height="220" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="600" y="64" class="l" fill="var(--ink-3)">Current membership · customer_groups_v2 FINAL</text>
+
+        <rect x="610" y="88" width="200" height="140" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="710" y="128" text-anchor="middle" class="l" fill="var(--pine)">Matched emit</text>
+        <text x="710" y="150" text-anchor="middle" class="s" fill="var(--ink)">WHERE</text>
+        <text x="710" y="166" text-anchor="middle" class="s" fill="var(--ink)">AND NOT IN group</text>
+        <text x="710" y="194" text-anchor="middle" class="s" fill="var(--pine)">→ upsert</text>
+
+        <rect x="830" y="88" width="200" height="140" rx="6" fill="var(--oxide-soft)" stroke="var(--oxide)"/>
+        <text x="930" y="128" text-anchor="middle" class="l" fill="var(--oxide)">Unmatched emit</text>
+        <text x="930" y="150" text-anchor="middle" class="s" fill="var(--ink)">NOT WHERE</text>
+        <text x="930" y="166" text-anchor="middle" class="s" fill="var(--ink)">AND IN group</text>
+        <text x="930" y="194" text-anchor="middle" class="s" fill="var(--oxide)">→ delete</text>
+      </svg>
+      <figcaption>
+        <b>Two populations never leave ClickHouse as events:</b>
+        customers who already match and are already members, and customers who
+        already fail and were never members. The sink topics only see change.
+      </figcaption>
+    </figure>
+
+    <div class="col">
+      <p>
+        <code>fetch_customer_profiles</code> — a pair-wise merge of the two profile
+        tables into a <code>CustomerProfile</code> dataclass — exists on
+        <code>ClickHouseService</code> and is unused by <code>process_group</code>.
+        Evaluation goes through the combined SQL templates in
+        <code>services/clickhouse/queries.py</code>.
+      </p>
+    </div>
+  </section>
+
+  <!-- 07 payloads -->
+  <section>
+    <div class="sec-head">
+      <span class="num">07</span>
+      <h2>What goes on the wire</h2>
+    </div>
+    <div class="col">
+      <p>
+        README still describes two output topics. The producer has three.
+        Defaults below are the code fallbacks when env is unset — production
+        overrides them.
+      </p>
+    </div>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr>
+            <th>Env</th>
+            <th>Default topic</th>
+            <th>When</th>
+            <th>Key</th>
+            <th>Body</th>
+            <th>Downstream</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>KAFKA_OPENSEARCH_TOPIC</code></td>
+            <td class="mono">customer-groups-opensearch</td>
+            <td>Each matched customer</td>
+            <td class="mono">{customer_id}_{store_id}</td>
+            <td>
+              <code>id</code>, <code>auto_groups: ["{group_id}"]</code>,
+              <code>updated_fields: ["auto_groups"]</code>, <code>is_new: 0</code>.
+              Leavers are not published here.
+            </td>
+            <td>OpenSearch indexer</td>
+          </tr>
+          <tr>
+            <td><code>KAFKA_MYSQL_TOPIC</code></td>
+            <td class="mono">customer-groups-mysql-sync</td>
+            <td>Matched → upsert; unmatched → delete</td>
+            <td class="mono">{customer_id}_{group_id}</td>
+            <td>
+              Envelope: <code>type</code>, <code>table: customer_groups_v2</code>,
+              <code>database: salla</code>, <code>service: clickhouse_auto</code>,
+              <code>where_clause</code> on customer/group/<code>source: auto</code>.
+              Upsert also carries <code>created_at</code> / <code>updated_at</code> UTC ISO.
+            </td>
+            <td>mysql_kafka_sink_connector</td>
+          </tr>
+          <tr>
+            <td><code>KAFKA_MYSQL_ACTIVE_UPDATER_TOPIC</code></td>
+            <td class="mono">prod.active_group_updater</td>
+            <td>Once per successful evaluation with a store_id</td>
+            <td class="mono">group_{id}_status</td>
+            <td>
+              Upsert <code>salla.groups</code> where <code>id</code>,
+              data <code>{ "status": "active" }</code>,
+              same <code>service: clickhouse_auto</code> envelope.
+            </td>
+            <td>mysql-sink-connector-python</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note" style="margin-top:22px">
+      <p class="hd">OpenSearch payload is this group only</p>
+      <p>
+        <code>auto_groups</code> is sent as a one-element array containing the
+        current <code>group_id</code>. This service does not read the customer’s
+        existing groups. Merge-or-replace is the indexer’s job.
+        Because deletions never hit this topic, search documents can stay stale
+        unless some other path removes the id.
+      </p>
+    </div>
+  </section>
+
+  <!-- 08 files -->
+  <section>
+    <div class="sec-head">
+      <span class="num">08</span>
+      <h2>Where the code lives</h2>
+    </div>
+
+    <div class="filemap">
+      <div class="frow">
+        <div class="path">consumer.py</div>
+        <div class="what"><b>The loop.</b> Poll, parse, skip, submit, commit, drain. Logger name <code>evaluation-syncer</code>.</div>
+      </div>
+      <div class="frow">
+        <div class="path">executors/consumer_executor.py</div>
+        <div class="what"><b>process_group.</b> Orchestrates the five services. Also a CLI for one-shot evaluation.</div>
+      </div>
+      <div class="frow">
+        <div class="path">services/mysql/</div>
+        <div class="what"><b>Definition access.</b> Env: <code>MYSQL_HOST</code>, <code>MYSQL_PORT</code>, <code>MYSQL_USERNAME</code>, <code>MYSQL_PASSWORD</code>, <code>MYSQL_DATABASE_NAME</code> — not the <code>MYSQL_USER</code> / <code>MYSQL_DATABASE</code> names in <code>.env.example</code>.</div>
+      </div>
+      <div class="frow">
+        <div class="path">services/condition_relationships/</div>
+        <div class="what"><b>Resolver.</b> Groups partnered types into related sets; leftover rows stay standalone.</div>
+      </div>
+      <div class="frow">
+        <div class="path">services/query_generator/</div>
+        <div class="what"><b>Compiler.</b> <code>constants.py</code> (column + symbol maps), <code>helpers.py</code> (value parsing), <code>builders.py</code> (fragments), <code>service.py</code> (join), <code>types.py</code> (<code>OperatorType</code>).</div>
+      </div>
+      <div class="frow">
+        <div class="path">services/clickhouse/</div>
+        <div class="what"><b>Scoring.</b> SQL templates in <code>queries.py</code>. HTTP client via <code>clickhouse_connect</code>. Host scheme (<code>http://</code> / <code>https://</code>) is stripped; TLS is <code>CLICKHOUSE_SECURE</code>.</div>
+      </div>
+      <div class="frow">
+        <div class="path">services/assignment/</div>
+        <div class="what"><b>Producer.</b> Three topics, delivery callback, MSK-aware idle timeout.</div>
+      </div>
+      <div class="frow">
+        <div class="path">docker-compose.yml</div>
+        <div class="what"><b>Local stack.</b> Debezium Kafka + ZooKeeper + Connect, MySQL 8 (salla seed), ClickHouse 23.8, Postgres + Conduktor UI. The consumer itself is not a compose service — run <code>python consumer.py</code>.</div>
+      </div>
+      <div class="frow">
+        <div class="path">Dockerfile</div>
+        <div class="what"><b>python:3.12-slim</b> + librdkafka + MySQL client libs. <code>CMD python consumer.py</code>. CI builds and pushes ECR tags on PRs (<code>stage-{branch}-{sha7}</code>) and on master (semver).</div>
+      </div>
+      <div class="frow">
+        <div class="path">scripts/mysql-init.sql</div>
+        <div class="what"><b>Local schema.</b> <code>groups</code>, <code>customer_group_conditions</code>, <code>condition_relationships</code>, plus seed rows including the two related-set definitions.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 09 decisions -->
+  <section>
+    <div class="sec-head">
+      <span class="num">09</span>
+      <h2>Decisions that are load-bearing</h2>
+    </div>
+    <div class="col">
+      <p>
+        These are not style. Change one and membership, lag, or a downstream
+        connector changes meaning.
+      </p>
+    </div>
+
+    <div class="grid-2" style="margin-top:8px">
+      <div class="note">
+        <p class="hd">Evaluate the delta, not the set</p>
+        <p>
+          ClickHouse already knows who is in <code>customer_groups_v2</code>.
+          Publishing the full match set every run would thrash MySQL and
+          OpenSearch. The <code>IN</code> / <code>NOT IN</code> subqueries are
+          the contract with the sinks.
+        </p>
+      </div>
+      <div class="note">
+        <p class="hd">Commit after the worker, not after poll</p>
+        <p>
+          <code>enable.auto.commit</code> is false. A crash mid-evaluation
+          redelivers the <code>group_id</code>. At-least-once. Sinks must
+          tolerate a repeated upsert; a repeated delete of an already-removed
+          row is the connector’s problem.
+        </p>
+      </div>
+      <div class="note">
+        <p class="hd">Eligibility is upstream</p>
+        <p>
+          Timeplus filters <code>queue</code> and expiry. This process would
+          happily evaluate an expired group if someone published the id.
+          That is a feature of the boundary, not a missing <code>if</code>.
+        </p>
+      </div>
+      <div class="note">
+        <p class="hd">Empty conditions match nobody</p>
+        <p>
+          <code>1 = 0</code> means a group with no live conditions assigns
+          nobody and, via unmatched, removes everyone currently in it
+          (who is in <code>customer_groups_v2</code> for that group).
+        </p>
+      </div>
+      <div class="note">
+        <p class="hd">OpenSearch is assign-only</p>
+        <p>
+          Leavers are MySQL deletes only. Search membership can diverge from
+          <code>customer_groups_v2</code> unless another job repairs
+          <code>auto_groups</code>.
+        </p>
+      </div>
+      <div class="note">
+        <p class="hd">Status flip is part of evaluation</p>
+        <p>
+          <code>send_group_status_update</code> runs after assignments and
+          deletions, still inside the same <code>store_id</code> branch.
+          The group is marked active even if both customer lists were empty.
+        </p>
+      </div>
+      <div class="note warn">
+        <p class="hd">Docs lag the code</p>
+        <p>
+          README: two output topics, <code>KAFKA_TOPIC</code>, operator 1 = UNION.
+          Code: three topics, <code>KAFKA_TOPICS</code>, operator 1 = INTERSECT.
+          Trust <code>OperatorType</code>, <code>GroupAssignmentService</code>,
+          and <code>consumer.py</code>.
+        </p>
+      </div>
+      <div class="note warn">
+        <p class="hd">Env names are not symmetric</p>
+        <p>
+          MySQL user/database in code: <code>MYSQL_USERNAME</code>,
+          <code>MYSQL_DATABASE_NAME</code>. Example file: <code>MYSQL_USER</code>,
+          <code>MYSQL_DATABASE</code>. A local <code>.env</code> copied from the
+          example will connect as empty user/database unless renamed.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 stack -->
+  <section>
+    <div class="sec-head">
+      <span class="num">10</span>
+      <h2>Stack</h2>
+    </div>
+    <div class="col">
+      <p>
+        Runtime is Python 3.12. Kafka client is <code>confluent_kafka</code>
+        (librdkafka). MySQL is <code>mysql-connector-python</code>. ClickHouse
+        is <code>clickhouse_connect</code> over HTTP (8123 by default).
+        Config via <code>python-dotenv</code>.
+      </p>
+      <p>
+        Local compose brings Kafka advertised on 9094, a MySQL 8 with the salla
+        seed, ClickHouse 23.8, and Conduktor on 8087. Production Kafka uses
+        SASL_SSL / SCRAM-SHA-512 when <code>WORKER_ENV</code> is
+        <code>production</code> or <code>stage</code>. Images land in ECR as
+        <code>data/activate-customer-consumer-python</code> from
+        <code>.github/workflows/build.yml</code> (eu-central-1).
+      </p>
+      <p>
+        Upstream of the input topic: Timeplus, itself fed from the customer
+        / groups event path. Downstream of the three output topics: the MySQL
+        Kafka sink connector, an OpenSearch indexer, and
+        <code>mysql-sink-connector-python</code>. None of those are in this
+        repository.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <p style="margin:0 0 .6rem">
+      Drawn from <code>consumer.py</code>, <code>executors/consumer_executor.py</code>,
+      <code>services/</code>, <code>docker-compose.yml</code>, and the SQL templates —
+      not from the README where the README disagrees.
+    </p>
+    <p class="mono" style="font-size:.76rem;margin:0">
+      activate-customer-consumer-python · evaluation-syncer · no credentials on this page
+    </p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById("theme-toggle");
+  var stored = null;
+  try { stored = localStorage.getItem("cge-theme"); } catch (e) {}
+  if (stored === "light" || stored === "dark") {
+    root.setAttribute("data-theme", stored);
+  }
+  function label() {
+    var now = root.getAttribute("data-theme");
+    if (now === "dark") return "Light";
+    if (now === "light") return "Dark";
+    var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return prefersDark ? "Light" : "Dark";
+  }
+  function applyLabel() { if (btn) btn.textContent = label(); }
+  applyLabel();
+  if (btn) {
+    btn.addEventListener("click", function () {
+      var now = root.getAttribute("data-theme");
+      var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      var next;
+      if (now === "dark") next = "light";
+      else if (now === "light") next = "dark";
+      else next = prefersDark ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("cge-theme", next); } catch (e) {}
+      applyLabel();
+    });
+  }
+})();
+</script>
+</body>
+</html>

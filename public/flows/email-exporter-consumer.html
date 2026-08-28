@@ -1,0 +1,1475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Email Exporter Consumer — how it works</title>
+<meta name="description" content="Architecture of the Python Kafka consumer that exports ClickHouse data to CSV/XLSX on S3/MinIO and emails a download link.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+  :root {
+    --paper:      #F1F3F2;
+    --surface:    #FAFBFA;
+    --surface-2:  #E7EBE9;
+    --ink:        #16201F;
+    --ink-2:      #3E4C4A;
+    --ink-3:      #6B7A77;
+    --rule:       #CFD8D5;
+    --rule-soft:  #DFE5E3;
+
+    --pine:       #0F6E63;
+    --pine-soft:  #DCEBE8;
+    --amber:      #9A5B00;
+    --amber-soft: #F5E8D2;
+    --oxide:      #9E2B18;
+    --oxide-soft: #F6DED9;
+    --cool:       #1F4E79;
+    --cool-soft:  #DCE6F0;
+
+    --shadow: 0 1px 2px rgba(22,32,31,.06), 0 8px 24px -12px rgba(22,32,31,.18);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0E1413;
+      --surface:    #151D1C;
+      --surface-2:  #1E2827;
+      --ink:        #E4EAE8;
+      --ink-2:      #B0BEBB;
+      --ink-3:      #7F8F8C;
+      --rule:       #2C3937;
+      --rule-soft:  #222D2C;
+
+      --pine:       #5FC4B4;
+      --pine-soft:  #12312D;
+      --amber:      #D99A4E;
+      --amber-soft: #33240F;
+      --oxide:      #E08575;
+      --oxide-soft: #381914;
+      --cool:       #7BA7D4;
+      --cool-soft:  #1A2836;
+
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #0E1413;
+    --surface:    #151D1C;
+    --surface-2:  #1E2827;
+    --ink:        #E4EAE8;
+    --ink-2:      #B0BEBB;
+    --ink-3:      #7F8F8C;
+    --rule:       #2C3937;
+    --rule-soft:  #222D2C;
+
+    --pine:       #5FC4B4;
+    --pine-soft:  #12312D;
+    --amber:      #D99A4E;
+    --amber-soft: #33240F;
+    --oxide:      #E08575;
+    --oxide-soft: #381914;
+    --cool:       #7BA7D4;
+    --cool-soft:  #1A2836;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 24px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  .col  { max-width: 68ch; }
+
+  h1, h2, h3, .label, .stage-n, th, .mono, .l { font-family: "Archivo", "Helvetica Neue", Arial, sans-serif; }
+
+  h1 {
+    font-size: clamp(2.1rem, 5vw, 3.1rem);
+    font-weight: 700;
+    letter-spacing: -.025em;
+    line-height: 1.05;
+    text-wrap: balance;
+    margin: 0 0 .5rem;
+  }
+  h2 {
+    font-size: clamp(1.35rem, 2.4vw, 1.7rem);
+    font-weight: 600;
+    letter-spacing: -.015em;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h3 {
+    font-size: 1.02rem;
+    font-weight: 600;
+    letter-spacing: -.005em;
+    margin: 0 0 .4rem;
+  }
+  p { margin: 0 0 1.05rem; }
+  a { color: var(--pine); text-underline-offset: 3px; }
+  strong { font-weight: 600; }
+  em { font-style: italic; color: var(--ink-2); }
+
+  .label {
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .lede {
+    font-size: 1.16rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 62ch;
+  }
+
+  code, .mono, pre, .m, .s { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+  code {
+    font-size: .85em;
+    background: var(--surface-2);
+    padding: .12em .38em;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 6px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: .82rem;
+    line-height: 1.6;
+    margin: 0;
+    color: var(--ink-2);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  header.masthead {
+    padding: 72px 0 40px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .kicker {
+    display: flex; gap: 14px; align-items: baseline;
+    margin-bottom: 22px; flex-wrap: wrap;
+  }
+  .kicker .sep { color: var(--rule); }
+
+  .theme-btn {
+    margin-left: auto;
+    font-family: "Archivo", sans-serif;
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: .4em .75em;
+    cursor: pointer;
+  }
+  .theme-btn:hover { border-color: var(--pine); color: var(--pine); }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--rule-soft); }
+  section:last-of-type { border-bottom: none; }
+  .sec-head { display: flex; gap: 18px; align-items: baseline; margin-bottom: 28px; }
+  .sec-head .num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; font-weight: 700;
+    color: var(--pine);
+    padding-top: .35em;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+
+  .pipeline { display: flex; flex-direction: column; gap: 0; margin-top: 8px; }
+
+  .stage {
+    display: grid;
+    grid-template-columns: 58px 1fr;
+    gap: 22px;
+    position: relative;
+    padding: 22px 0;
+  }
+  .stage:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: 28px; top: 56px; bottom: -6px;
+    width: 2px;
+    background: linear-gradient(var(--rule), var(--rule-soft));
+  }
+  .stage-n {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--surface);
+    border: 2px solid var(--rule);
+    font-size: .82rem; font-weight: 700;
+    color: var(--ink-2);
+    position: relative; z-index: 1;
+  }
+  .stage.happy .stage-n { border-color: var(--pine); color: var(--pine); }
+  .stage.warn .stage-n { border-color: var(--amber); color: var(--amber); }
+  .stage.stop .stage-n { border-color: var(--oxide); color: var(--oxide); }
+
+  .stage-body { padding-top: 4px; min-width: 0; }
+  .stage-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  .stage-body p { margin-bottom: .7rem; max-width: 62ch; }
+
+  .chip {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .64rem; font-weight: 500;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: .25em .6em; border-radius: 3px;
+    white-space: nowrap;
+  }
+  .chip.happy { background: var(--pine-soft); color: var(--pine); }
+  .chip.warn  { background: var(--amber-soft); color: var(--amber); }
+  .chip.stop  { background: var(--oxide-soft); color: var(--oxide); }
+  .chip.cool  { background: var(--cool-soft); color: var(--cool); }
+
+  .gate {
+    border-left: 3px solid var(--oxide);
+    background: var(--oxide-soft);
+    padding: 10px 14px;
+    border-radius: 0 4px 4px 0;
+    font-size: .9rem;
+    color: var(--ink);
+    max-width: 62ch;
+  }
+  .gate .label { color: var(--oxide); display: block; margin-bottom: 2px; }
+  .gate.amber { border-left-color: var(--amber); background: var(--amber-soft); }
+  .gate.amber .label { color: var(--amber); }
+  .gate.pine { border-left-color: var(--pine); background: var(--pine-soft); }
+  .gate.pine .label { color: var(--pine); }
+
+  .t-wrap { overflow-x: auto; border: 1px solid var(--rule-soft); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th {
+    text-align: left;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { color: var(--ink); }
+  td.num { font-family: "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+
+  .filemap {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .frow {
+    display: grid;
+    grid-template-columns: minmax(210px, 280px) 1fr;
+    gap: 20px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--rule-soft);
+    align-items: baseline;
+  }
+  .frow:last-child { border-bottom: none; }
+  .frow .path {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .78rem;
+    color: var(--pine);
+    word-break: break-word;
+  }
+  .frow .what { font-size: .93rem; color: var(--ink-2); }
+  .frow .what b { color: var(--ink); font-weight: 600; }
+
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--pine);
+    border-radius: 0 6px 6px 0;
+    padding: 16px 20px;
+    max-width: 66ch;
+  }
+  .note.warn { border-left-color: var(--amber); }
+  .note.stop { border-left-color: var(--oxide); }
+  .note p:last-child { margin-bottom: 0; }
+  .note .hd {
+    font-family: "Archivo", sans-serif;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--pine); margin: 0 0 .4rem;
+  }
+  .note.warn .hd { color: var(--amber); }
+  .note.stop .hd { color: var(--oxide); }
+
+  .card {
+    border: 1px solid var(--rule);
+    border-top-width: 3px;
+    border-radius: 6px;
+    padding: 16px 18px;
+    background: var(--surface);
+  }
+  .card.pine { border-top-color: var(--pine); }
+  .card.amber { border-top-color: var(--amber); }
+  .card.oxide { border-top-color: var(--oxide); }
+  .card.cool { border-top-color: var(--cool); }
+  .card h3 { margin-bottom: 8px; }
+  .card p:last-child { margin-bottom: 0; }
+  .card ul { margin: 0; padding-left: 1.1em; font-size: .88rem; color: var(--ink-2); }
+  .card li { margin-bottom: 5px; }
+
+  figure {
+    margin: 1.9rem 0 1rem;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 1.5rem 1.3rem 1.1rem;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  figcaption {
+    font-family: "Archivo", sans-serif;
+    font-size: .75rem;
+    color: var(--ink-3);
+    margin-top: 1rem;
+    padding-top: .85rem;
+    border-top: 1px solid var(--rule);
+    line-height: 1.5;
+  }
+  figcaption b { color: var(--ink); font-weight: 600; }
+  svg { display: block; max-width: 100%; height: auto; }
+  .l { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .m { font-size: 11px; }
+  .s { font-size: 10px; }
+
+  ul { margin: 0 0 1.05rem; padding-left: 1.25rem; }
+  li { margin-bottom: .4rem; }
+
+  footer {
+    padding-top: 40px;
+    color: var(--ink-3);
+    font-size: .88rem;
+    border-top: 1px solid var(--rule-soft);
+    margin-top: 20px;
+  }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; padding: 0 18px 64px; }
+    .stage { grid-template-columns: 40px 1fr; gap: 16px; }
+    .stage-n { width: 40px; height: 40px; font-size: .72rem; }
+    .stage:not(:last-child)::after { left: 19px; top: 42px; }
+    .frow { grid-template-columns: 1fr; gap: 4px; }
+    .sec-head { gap: 12px; }
+    .theme-btn { margin-left: 0; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: opacity .15s ease; }
+    a:hover { opacity: .75; }
+  }
+  :focus-visible { outline: 2px solid var(--pine); outline-offset: 2px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="kicker">
+      <span class="label">email-exporter-consumer-python</span>
+      <span class="sep">/</span>
+      <span class="label">Kafka → ClickHouse → S3 → email</span>
+      <button type="button" class="theme-btn" id="theme-toggle" aria-label="Toggle colour theme">Theme</button>
+    </div>
+    <h1>How the exporter<br>is written, and how it works</h1>
+    <p class="lede">
+      A Python Kafka consumer that turns a store’s export request into a CSV
+      (or XLSX) on S3-compatible storage and emails the merchant a download
+      link. Three consumer entrypoints; one executor process per message.
+    </p>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">01</span>
+      <h2>The shape of the system</h2>
+    </div>
+    <div class="col">
+      <p>
+        A merchant asks for a data export. Some other service publishes a JSON
+        payload to a Kafka topic. This process is the consumer of that topic.
+        It does not serve HTTP. It polls, filters, and for each accepted
+        message it spawns <code>app/kafkaConsumeExecutor.py</code> as a
+        subprocess. All of the export work lives in that subprocess.
+      </p>
+      <p>
+        Three facts about this shape drive the rest of the design:
+      </p>
+    </div>
+    <div class="grid-2" style="margin-top:22px">
+      <div class="note">
+        <h3>The consumer does not do the work</h3>
+        <p style="font-size:.93rem;color:var(--ink-2)">
+          <code>consumer.py</code>, <code>consumer_queue.py</code>, and
+          <code>consumer_batches.py</code> only poll Kafka and spawn
+          <code>python app/kafkaConsumeExecutor.py --message '&lt;json&gt;'</code>.
+          Isolation is a process boundary, not a thread.
+        </p>
+      </div>
+      <div class="note">
+        <h3>ClickHouse writes the file</h3>
+        <p style="font-size:.93rem;color:var(--ink-2)">
+          The consumer never materialises the result set in Python for the
+          main path. ClickHouse runs
+          <code>INSERT INTO FUNCTION s3(..., 'CSVWithNames')</code>
+          and this process only asks MinIO for a seven-day presigned GET URL.
+        </p>
+      </div>
+      <div class="note">
+        <h3>Handlers are optional until they are not</h3>
+        <p style="font-size:.93rem;color:var(--ink-2)">
+          PostgreSQL tracking is off unless <code>PG_HOST</code> is set.
+          WebSocket progress and Optimus ID encoding exist as modules and are
+          not imported by the executor. Redis lock failures are treated as
+          “new export”. The pipeline prefers to continue.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">02</span>
+      <h2>End to end</h2>
+    </div>
+    <div class="col">
+      <p>
+        Twelve stages from a Kafka record to an emailed link. Side systems
+        (Redis, Postgres, Graylog, the CSV combiner) sit beside the happy path,
+        they are not the path.
+      </p>
+    </div>
+
+<figure>
+<svg viewBox="0 0 1080 430" role="img" aria-label="End-to-end export flow from Kafka through the executor to S3 and email">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+    </marker>
+  </defs>
+
+  <rect x="8" y="28" width="128" height="78" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+  <text x="72" y="58" text-anchor="middle" class="l" fill="var(--ink)">Kafka topic</text>
+  <text x="72" y="76" text-anchor="middle" class="s" fill="var(--ink-3)">KAFKA_TOPIC</text>
+  <text x="72" y="92" text-anchor="middle" class="s" fill="var(--ink-3)">confluent_kafka</text>
+
+  <line x1="136" y1="67" x2="168" y2="67" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="170" y="20" width="168" height="94" rx="7" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+  <text x="254" y="48" text-anchor="middle" class="l" fill="var(--pine)">Consumer</text>
+  <text x="254" y="68" text-anchor="middle" class="s" fill="var(--ink-2)">consumer.py</text>
+  <text x="254" y="84" text-anchor="middle" class="s" fill="var(--ink-2)">_queue / _batches</text>
+  <text x="254" y="102" text-anchor="middle" class="s" fill="var(--pine)">poll · filter live</text>
+
+  <line x1="338" y1="67" x2="370" y2="67" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="372" y="16" width="196" height="102" rx="7" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="2"/>
+  <text x="470" y="44" text-anchor="middle" class="l" fill="var(--amber)">Executor subprocess</text>
+  <text x="470" y="64" text-anchor="middle" class="s" fill="var(--ink-2)">kafkaConsumeExecutor.py</text>
+  <text x="470" y="80" text-anchor="middle" class="s" fill="var(--ink-2)">--message JSON</text>
+  <text x="470" y="100" text-anchor="middle" class="s" fill="var(--amber)">one process / message</text>
+
+  <line x1="568" y1="67" x2="600" y2="67" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="602" y="20" width="150" height="94" rx="7" fill="var(--cool-soft)" stroke="var(--cool)" stroke-width="2"/>
+  <text x="677" y="48" text-anchor="middle" class="l" fill="var(--cool)">ClickHouse</text>
+  <text x="677" y="68" text-anchor="middle" class="s" fill="var(--ink-2)">clickhouse_connect</text>
+  <text x="677" y="84" text-anchor="middle" class="s" fill="var(--ink-2)">INSERT INTO FUNCTION s3</text>
+  <text x="677" y="102" text-anchor="middle" class="s" fill="var(--cool)">CSVWithNames</text>
+
+  <line x1="752" y1="67" x2="784" y2="67" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="786" y="20" width="140" height="94" rx="7" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+  <text x="856" y="48" text-anchor="middle" class="l" fill="var(--pine)">MinIO / S3</text>
+  <text x="856" y="68" text-anchor="middle" class="s" fill="var(--ink-2)">presigned GET</text>
+  <text x="856" y="84" text-anchor="middle" class="s" fill="var(--ink-2)">expires 7 days</text>
+  <text x="856" y="102" text-anchor="middle" class="s" fill="var(--pine)">minio SDK</text>
+
+  <line x1="926" y1="67" x2="958" y2="67" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="960" y="20" width="110" height="94" rx="7" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="2"/>
+  <text x="1015" y="52" text-anchor="middle" class="l" fill="var(--amber)">Email</text>
+  <text x="1015" y="72" text-anchor="middle" class="s" fill="var(--ink-2)">MJML → HTML</text>
+  <text x="1015" y="90" text-anchor="middle" class="s" fill="var(--ink-2)">SMTP / Mailgun / SES</text>
+
+  <!-- lower band: side systems -->
+  <text x="8" y="160" class="l" fill="var(--ink-3)">Beside the path</text>
+
+  <rect x="8" y="176" width="250" height="88" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+  <text x="24" y="202" class="l" fill="var(--ink)">Redis</text>
+  <text x="24" y="222" class="s" fill="var(--ink-2)">lock "1" · 60s TTL</text>
+  <text x="24" y="238" class="s" fill="var(--ink-2)">cached link · 900s TTL</text>
+  <text x="24" y="254" class="s" fill="var(--ink-3)">stale if TTL ≤ 10s</text>
+
+  <rect x="274" y="176" width="250" height="88" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+  <text x="290" y="202" class="l" fill="var(--ink)">PostgreSQL</text>
+  <text x="290" y="222" class="s" fill="var(--ink-2)">export_requests table</text>
+  <text x="290" y="238" class="s" fill="var(--ink-2)">queued → … → succeeded</text>
+  <text x="290" y="254" class="s" fill="var(--ink-3)">off unless PG_HOST is set</text>
+
+  <rect x="540" y="176" width="250" height="88" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+  <text x="556" y="202" class="l" fill="var(--ink)">s3obj-materializer</text>
+  <text x="556" y="222" class="s" fill="var(--ink-2)">POST /combine · sync 600s</text>
+  <text x="556" y="238" class="s" fill="var(--ink-2)">orders / order-items only</text>
+  <text x="556" y="254" class="s" fill="var(--ink-3)">24 date slices · concurrency 6</text>
+
+  <rect x="806" y="176" width="264" height="88" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+  <text x="822" y="202" class="l" fill="var(--ink)">Graylog GELF</text>
+  <text x="822" y="222" class="s" fill="var(--ink-2)">udp | tcp | http</text>
+  <text x="822" y="238" class="s" fill="var(--ink-2)">exported_successfully</text>
+  <text x="822" y="254" class="s" fill="var(--ink-3)">processingStats · email-message</text>
+
+  <!-- guarantees -->
+  <line x1="170" y1="310" x2="568" y2="310" stroke="var(--pine)" stroke-width="2"/>
+  <text x="369" y="332" text-anchor="middle" class="m" fill="var(--pine)">at-least-once at Kafka</text>
+  <text x="369" y="350" text-anchor="middle" class="s" fill="var(--ink-3)">offset commit strategy depends on the consumer file</text>
+
+  <line x1="602" y1="310" x2="926" y2="310" stroke="var(--amber)" stroke-width="2"/>
+  <text x="764" y="332" text-anchor="middle" class="m" fill="var(--amber)">Redis is the duplicate gate</text>
+  <text x="764" y="350" text-anchor="middle" class="s" fill="var(--ink-3)">identical params within 15 minutes reuse the cached link</text>
+
+  <text x="8" y="392" class="s" fill="var(--ink-3)">Messages with live omitted or live:true are skipped as debug. Production traffic must send live:false.</text>
+  <text x="8" y="410" class="s" fill="var(--ink-3)">WebSocketPublisher and SallaDualOptimus are in app/ and are not called from the executor.</text>
+</svg>
+<figcaption><strong>The seam is the subprocess.</strong> Kafka offsets and worker threads live in the consumer. Query parsing, ClickHouse, S3, conversion, and email live in <code>kafkaConsumeExecutor.py</code>. A crash in one export does not take down the poll loop — unless the consumer waited on <code>subprocess.run</code>, which <code>consumer.py</code> does.</figcaption>
+</figure>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">03</span>
+      <h2>Three consumers, one executor</h2>
+    </div>
+    <div class="col">
+      <p>
+        The Dockerfile copies <code>consumer.py</code> and
+        <code>consumer_batches.py</code> and starts <code>python consumer.py</code>.
+        <code>consumer_queue.py</code> is in the repo and is not in the image.
+        All three use <code>confluent_kafka.Consumer</code>,
+        <code>auto.offset.reset: latest</code>, and SASL_SSL + SCRAM-SHA-512
+        when <code>WORKER_ENV</code> is <code>production</code> or
+        <code>stage</code>.
+      </p>
+    </div>
+
+<figure>
+<svg viewBox="0 0 1080 340" role="img" aria-label="Three consumer strategies compared">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+    </marker>
+  </defs>
+
+  <!-- consumer.py -->
+  <rect x="8" y="28" width="344" height="280" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+  <text x="24" y="54" class="l" fill="var(--pine)">consumer.py</text>
+  <text x="24" y="74" class="s" fill="var(--ink-3)">Dockerfile CMD · sequential</text>
+  <rect x="24" y="90" width="312" height="36" rx="4" fill="var(--pine-soft)" stroke="var(--pine)"/>
+  <text x="180" y="112" text-anchor="middle" class="m" fill="var(--pine)">poll 1s → pending list</text>
+  <line x1="180" y1="126" x2="180" y2="146" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="24" y="148" width="312" height="52" rx="4" fill="var(--surface-2)" stroke="var(--rule)"/>
+  <text x="180" y="170" text-anchor="middle" class="s" fill="var(--ink)">chunk of CHUNK_SIZE (default 5)</text>
+  <text x="180" y="186" text-anchor="middle" class="s" fill="var(--ink-3)">subprocess.run — waits</text>
+  <line x1="180" y1="200" x2="180" y2="220" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="24" y="222" width="312" height="36" rx="4" fill="var(--amber-soft)" stroke="var(--amber)"/>
+  <text x="180" y="244" text-anchor="middle" class="s" fill="var(--amber)">sleep SLEEP_BETWEEN_CHUNKS (default 5s)</text>
+  <text x="24" y="284" class="s" fill="var(--ink-3)">auto-commit on · no test/priority filter</text>
+  <text x="24" y="298" class="s" fill="var(--ink-3)">SIGINT / SIGTERM set running=False</text>
+
+  <!-- queue -->
+  <rect x="368" y="28" width="344" height="280" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+  <text x="384" y="54" class="l" fill="var(--cool)">consumer_queue.py</text>
+  <text x="384" y="74" class="s" fill="var(--ink-3)">not in the Docker image</text>
+  <rect x="384" y="90" width="312" height="36" rx="4" fill="var(--cool-soft)" stroke="var(--cool)"/>
+  <text x="540" y="112" text-anchor="middle" class="m" fill="var(--cool)">main thread poll → Queue(maxsize=10)</text>
+  <line x1="540" y1="126" x2="540" y2="146" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="384" y="148" width="312" height="52" rx="4" fill="var(--surface-2)" stroke="var(--rule)"/>
+  <text x="540" y="170" text-anchor="middle" class="s" fill="var(--ink)">N worker threads (default 5)</text>
+  <text x="540" y="186" text-anchor="middle" class="s" fill="var(--ink-3)">subprocess.Popen — does not wait</text>
+  <line x1="540" y1="200" x2="540" y2="220" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="384" y="222" width="312" height="36" rx="4" fill="var(--amber-soft)" stroke="var(--amber)"/>
+  <text x="540" y="244" text-anchor="middle" class="s" fill="var(--amber)">commit(msg) after spawn</text>
+  <text x="384" y="284" class="s" fill="var(--ink-3)">enable.auto.commit=False · priority + test filters</text>
+  <text x="384" y="298" class="s" fill="var(--ink-3)">full queue → do not commit (redeliver)</text>
+
+  <!-- batches -->
+  <rect x="728" y="28" width="344" height="280" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+  <text x="744" y="54" class="l" fill="var(--amber)">consumer_batches.py</text>
+  <text x="744" y="74" class="s" fill="var(--ink-3)">in the image · not the CMD</text>
+  <rect x="744" y="90" width="312" height="36" rx="4" fill="var(--amber-soft)" stroke="var(--amber)"/>
+  <text x="900" y="112" text-anchor="middle" class="m" fill="var(--amber)">accumulate BATCH_SIZE (default 50)</text>
+  <line x1="900" y1="126" x2="900" y2="146" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="744" y="148" width="312" height="52" rx="4" fill="var(--surface-2)" stroke="var(--rule)"/>
+  <text x="900" y="170" text-anchor="middle" class="s" fill="var(--ink)">chunks of CHUNK_SIZE via ThreadPoolExecutor</text>
+  <text x="900" y="186" text-anchor="middle" class="s" fill="var(--ink-3)">Popen — does not wait on the child</text>
+  <line x1="900" y1="200" x2="900" y2="220" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="744" y="222" width="312" height="36" rx="4" fill="var(--pine-soft)" stroke="var(--pine)"/>
+  <text x="900" y="244" text-anchor="middle" class="s" fill="var(--pine)">one commit of last_msg per batch</text>
+  <text x="744" y="284" class="s" fill="var(--ink-3)">5s idle timeout flushes a partial batch</text>
+  <text x="744" y="298" class="s" fill="var(--ink-3)">USE_BATCHING=false → semaphore fire-and-forget</text>
+</svg>
+<figcaption><strong>Commit meaning is not the same.</strong> Sequential <code>run</code> finishes the export before the next message. Queue and batch <code>Popen</code> treat “spawned” as done, so a child can still be writing to ClickHouse after the offset is committed. Queue and batch also keep a <code>deque</code> of active processes and poll them to reap zombies.</figcaption>
+</figure>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Parallelism</th>
+            <th>Commit</th>
+            <th>Filters before spawn</th>
+            <th>In Docker image</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">consumer.py</td>
+            <td>None. <code>subprocess.run</code> per message inside a chunk of 5, then a 5s sleep</td>
+            <td>Broker auto-commit (not disabled)</td>
+            <td><code>live</code> only</td>
+            <td>Yes — <code>CMD</code></td>
+          </tr>
+          <tr>
+            <td class="mono">consumer_queue.py</td>
+            <td><code>NUM_WORKER_THREADS</code> (5) × fire-and-forget <code>Popen</code></td>
+            <td>Manual, after spawn (also on worker error)</td>
+            <td><code>live</code>, priority, test-email by <code>WORKER_ENV</code></td>
+            <td>No</td>
+          </tr>
+          <tr>
+            <td class="mono">consumer_batches.py</td>
+            <td>Batch 50, chunk 5 via <code>ThreadPoolExecutor</code>; or semaphore of 10</td>
+            <td>Manual, once per full/timeout batch</td>
+            <td><code>live</code> only</td>
+            <td>Copied, not started</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note warn" style="margin-top:22px">
+      <p class="hd">The live flag</p>
+      <p>
+        All three consumers do <code>json_message.get("live", True)</code>.
+        If the field is missing, the message is logged as a debug skip.
+        Real export traffic has to set <code>"live": false</code>.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">04</span>
+      <h2>What the executor does</h2>
+    </div>
+    <div class="col">
+      <p>
+        <code>main(raw_message)</code> in <code>kafkaConsumeExecutor.py</code>
+        is the whole job. Handlers are constructed per process, not shared
+        across messages. The order below is the order in the file.
+      </p>
+    </div>
+
+    <div class="pipeline">
+
+      <div class="stage stop">
+        <div class="stage-n">01</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Skip filters</h3>
+            <span class="chip stop">may return</span>
+          </div>
+          <p>
+            <code>_apply_message_filters</code> runs before any handler is
+            built. Production drops <code>is_test</code>,
+            <code>parameters.is_test</code>, or a subject containing
+            <code>"test"</code>. Development and stage drop everything that is
+            <em>not</em> a test. If <code>CONSUMER_WORKING_PRIORITY_ENABLED</code>
+            is true, only messages whose <code>priority</code> equals
+            <code>CONSUMER_WORKING_PRIORITY</code> continue.
+          </p>
+          <div class="gate">
+            <span class="label">Gate</span>
+            <code>consumer.py</code> and <code>consumer_batches.py</code> do not
+            apply these filters themselves. They still spawn the subprocess;
+            the executor exits immediately.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage happy">
+        <div class="stage-n">02</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Parse and normalise</h3>
+            <span class="chip happy">Pydantic</span>
+          </div>
+          <p>
+            <code>MessageHandler.parse_message</code> validates
+            <code>EventPayload</code>: <code>id</code> (coerced to str),
+            <code>parameters</code>, optional <code>columns</code>,
+            <code>subject</code>, non-empty <code>to[]</code>, colours,
+            <code>type</code> (<code>csv</code> | <code>xlsx</code>, default csv),
+            <code>user_id</code>, <code>priority</code> (default 1),
+            <code>locale</code> (<code>ar</code> | <code>en</code>, default ar).
+            An audit id <code>AUDIT-{user_id}-{YYYYMMDDHHMMSS}</code> is written
+            onto the model and into the global <code>ErrorHandler</code>.
+          </p>
+          <p>
+            Preprocess: subject is <code>.title()</code>’d, emails lowercased,
+            colour strings stripped.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage warn">
+        <div class="stage-n">03</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Insert export_requests</h3>
+            <span class="chip warn">optional</span>
+          </div>
+          <p>
+            <code>PostgresHandler.from_env()</code> returns <code>None</code>
+            without <code>PG_HOST</code>. When present it
+            <code>CREATE TABLE IF NOT EXISTS</code> and inserts status
+            <code>queued</code>. Every PG method swallows exceptions so a down
+            database does not fail the export.
+          </p>
+          <div class="gate amber">
+            <span class="label">Schema mismatch</span>
+            The column <code>id</code> is declared <code>uuid PRIMARY KEY</code>.
+            The value written is <code>AUDIT-…</code>, which is not a UUID.
+            Inserts fail, are logged, and the rest of the pipeline continues
+            without a row.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage happy">
+        <div class="stage-n">04</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Redis lock / cache</h3>
+            <span class="chip happy">15-minute window</span>
+          </div>
+          <p>
+            Key: <code>{prefix}{store_id}_{export_id}_{sha256(params)}</code>.
+            Prefix is <code>export_ch:</code> in production, otherwise
+            <code>export_ch1:</code>. Four outcomes from
+            <code>check_export_lock</code> — see the diagram in section 05.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage happy">
+        <div class="stage-n">05</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Export</h3>
+            <span class="chip happy">ClickHouse → S3</span>
+          </div>
+          <p>
+            <code>ParallelBatchHandler.execute</code> is the only export
+            entry. IDs <code>777777</code> (orders) and <code>888888</code>
+            (order items) with both <code>from_date</code> and
+            <code>to_date</code> split the range into 24 slices and run 6 at
+            a time. Everything else — including products <code>100</code> —
+            is a single <code>run_write_query</code>.
+          </p>
+          <p>
+            PG status moves to <code>running</code> before the query, then
+            <code>combining</code> or <code>emailing</code> after.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage warn">
+        <div class="stage-n">06</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Row-count gate</h3>
+            <span class="chip warn">after the file exists</span>
+          </div>
+          <p>
+            For orders and order items only, three count templates run:
+            <code>GET_ORDERS_DATA_COUNT_NEW</code>,
+            <code>GET_DATA_COUNT</code> (unfiltered total from
+            <code>curated_data.orders_data</code>),
+            <code>GET_ORDER_ITEMS_DATA_COUNT_NEW</code>. The active count is
+            orders when id is <code>777777</code> and there is no
+            <code>product</code> filter; otherwise order items.
+          </p>
+          <p>
+            <code>skip_xlsx</code> is true when that count exceeds
+            <code>MAX_XLSX_ROW_COUNT</code> (default 200&nbsp;000).
+            <code>is_large_export</code> is true when total &gt; 30&nbsp;000 —
+            and the executor never reads that flag. Batching was already
+            decided in step 05 by id + date range.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage happy">
+        <div class="stage-n">07</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>CSV → XLSX</h3>
+            <span class="chip happy">pandas</span>
+          </div>
+          <p>
+            Only when <code>type</code> is <code>xlsx</code> and
+            <code>skip_xlsx</code> is false. Download the presigned CSV,
+            <code>pd.read_csv</code> → <code>df.to_excel</code>, upload to
+            the hardcoded bucket <code>exports</code>, new 7-day URL, delete
+            temp files. The unused <code>_convert_to_xlsx</code> still shells
+            out to <code>csv2xlsx.bin</code>. The MinIO client here is
+            constructed with <code>secure=False</code> regardless of the
+            endpoint scheme.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage happy">
+        <div class="stage-n">08</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Render and send</h3>
+            <span class="chip happy">MJML</span>
+          </div>
+          <p>
+            Jinja2 fills <code>email.eta.html</code> (RTL Arabic MJML: subject,
+            body, logo, <code>s3_url</code>, store colours). POST
+            <code>{MJML_URL}/v1/render</code>. Then
+            <code>EmailHandler.send_email</code>.
+          </p>
+          <div class="gate amber">
+            <span class="label">The method that actually runs</span>
+            <code>send_email</code> is defined twice in
+            <code>emailHandlerClass.py</code>. The second definition — SMTP to
+            <code>localhost:1025</code> (MailHog’s default in compose) —
+            replaces the Mailgun/SES dispatcher. <code>send_mailgun_email</code>
+            and <code>send_ses_email</code> exist and are not called from the
+            executor.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage happy">
+        <div class="stage-n">09</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Cache and log</h3>
+            <span class="chip happy">side effects</span>
+          </div>
+          <p>
+            On success: PG <code>succeeded</code>, Redis stores the file link
+            under the lock key for 900 seconds, Graylog
+            <code>exported_successfully</code>, <code>email-message</code>, and
+            <code>processingStats</code> with ClickHouse / XLSX / email
+            durations. Top-level exceptions become
+            <code>exporting_error</code>.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">05</span>
+      <h2>Redis is a lock, then a cache</h2>
+    </div>
+    <div class="col">
+      <p>
+        This is not a hash of the whole Kafka payload. The key is store,
+        export type id, and a stable SHA-256 of <code>parameters</code>
+        (sorted keys). Value <code>"1"</code> means in progress. Any other
+        string is treated as a finished file link.
+      </p>
+    </div>
+
+<figure>
+<svg viewBox="0 0 1080 250" role="img" aria-label="Redis lock state machine">
+  <rect x="8" y="40" width="200" height="100" rx="7" fill="var(--surface-2)" stroke="var(--rule)"/>
+  <text x="108" y="78" text-anchor="middle" class="l" fill="var(--ink)">Key missing</text>
+  <text x="108" y="100" text-anchor="middle" class="s" fill="var(--ink-2)">SET key="1" EX 60</text>
+  <text x="108" y="120" text-anchor="middle" class="m" fill="var(--pine)">action = new</text>
+
+  <rect x="228" y="40" width="250" height="100" rx="7" fill="var(--amber-soft)" stroke="var(--amber)"/>
+  <text x="353" y="78" text-anchor="middle" class="l" fill="var(--amber)">Value "1", TTL &gt; 10</text>
+  <text x="353" y="100" text-anchor="middle" class="s" fill="var(--ink-2)">another worker holds it</text>
+  <text x="353" y="120" text-anchor="middle" class="m" fill="var(--amber)">action = skip · return</text>
+
+  <rect x="498" y="40" width="250" height="100" rx="7" fill="var(--cool-soft)" stroke="var(--cool)"/>
+  <text x="623" y="78" text-anchor="middle" class="l" fill="var(--cool)">Value "1", TTL ≤ 10</text>
+  <text x="623" y="100" text-anchor="middle" class="s" fill="var(--ink-2)">refresh lock EX 60</text>
+  <text x="623" y="120" text-anchor="middle" class="m" fill="var(--cool)">action = reprocess</text>
+
+  <rect x="768" y="40" width="300" height="100" rx="7" fill="var(--pine-soft)" stroke="var(--pine)"/>
+  <text x="918" y="78" text-anchor="middle" class="l" fill="var(--pine)">Value is a URL</text>
+  <text x="918" y="100" text-anchor="middle" class="s" fill="var(--ink-2)">resend email with cached_link</text>
+  <text x="918" y="120" text-anchor="middle" class="m" fill="var(--pine)">action = cached · return</text>
+
+  <text x="8" y="180" class="s" fill="var(--ink-3)">On Redis errors, check_export_lock returns action=new so the export still runs.</text>
+  <text x="8" y="198" class="s" fill="var(--ink-3)">save_export_result writes the final link with CACHE_TTL_SECONDS = 900. A second identical request inside that window does not hit ClickHouse.</text>
+  <text x="8" y="216" class="s" fill="var(--ink-3)">LOCK_TTL_SECONDS = 60 · STALE_LOCK_THRESHOLD_SECONDS = 10 · constants in redisHandlerTypes.py</text>
+  <text x="8" y="234" class="s" fill="var(--ink-3)">generate_hash / exists / set remain on the class; the executor uses the lock API, not a hash of the full message.</text>
+</svg>
+<figcaption><strong>Skip means “someone else is doing this.”</strong> The worker does not wait. The merchant does not get a second email until the first run stores a link, or the 60-second lock goes stale.</figcaption>
+</figure>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">06</span>
+      <h2>Single query vs 24 slices</h2>
+    </div>
+    <div class="col">
+      <p>
+        <code>LARGE_EXPORT_IDS = {"777777", "888888"}</code>. If either date
+        is missing, the handler logs a warning and falls back to one query.
+        Dates that look like <code>YYYY-MM-DD</code> are parsed to a Unix
+        timestamp; anything else is <code>int(value)</code>.
+      </p>
+    </div>
+
+<figure>
+<svg viewBox="0 0 1080 300" role="img" aria-label="Parallel batch export versus single query">
+  <defs>
+    <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+    </marker>
+  </defs>
+
+  <text x="8" y="24" class="l" fill="var(--ink)">Not large, or no date range</text>
+  <rect x="8" y="40" width="200" height="70" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+  <text x="108" y="68" text-anchor="middle" class="s" fill="var(--ink)">parse_query</text>
+  <text x="108" y="86" text-anchor="middle" class="s" fill="var(--ink-3)">QueryHandler</text>
+  <line x1="208" y1="75" x2="236" y2="75" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <rect x="238" y="40" width="240" height="70" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+  <text x="358" y="68" text-anchor="middle" class="s" fill="var(--pine)">INSERT INTO FUNCTION s3</text>
+  <text x="358" y="86" text-anchor="middle" class="s" fill="var(--ink-3)">CSVWithNames · one file</text>
+  <line x1="478" y1="75" x2="506" y2="75" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <rect x="508" y="40" width="200" height="70" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+  <text x="608" y="68" text-anchor="middle" class="s" fill="var(--ink)">presigned URL</text>
+  <text x="608" y="86" text-anchor="middle" class="s" fill="var(--ink-3)">combined = false</text>
+
+  <text x="8" y="148" class="l" fill="var(--ink)">Orders / order items with from_date and to_date</text>
+  <rect x="8" y="164" width="168" height="88" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+  <text x="92" y="192" text-anchor="middle" class="s" fill="var(--amber)">24 equal time slices</text>
+  <text x="92" y="210" text-anchor="middle" class="s" fill="var(--ink-3)">PARALLEL_BATCH_COUNT</text>
+  <text x="92" y="226" text-anchor="middle" class="s" fill="var(--ink-3)">default 24</text>
+  <line x1="176" y1="208" x2="204" y2="208" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <rect x="206" y="164" width="200" height="88" rx="6" fill="var(--cool-soft)" stroke="var(--cool)"/>
+  <text x="306" y="192" text-anchor="middle" class="s" fill="var(--cool)">ThreadPoolExecutor</text>
+  <text x="306" y="210" text-anchor="middle" class="s" fill="var(--ink-3)">concurrency 6</text>
+  <text x="306" y="226" text-anchor="middle" class="s" fill="var(--ink-3)">*_batch_N.csv</text>
+  <line x1="406" y1="208" x2="434" y2="208" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <rect x="436" y="164" width="250" height="88" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+  <text x="561" y="188" text-anchor="middle" class="s" fill="var(--pine)">POST /combine</text>
+  <text x="561" y="206" text-anchor="middle" class="s" fill="var(--ink-3)">s3obj-materializer</text>
+  <text x="561" y="222" text-anchor="middle" class="s" fill="var(--ink-3)">Idempotency-Key · sync 600s</text>
+  <line x1="686" y1="208" x2="714" y2="208" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr3)"/>
+  <rect x="716" y="164" width="348" height="88" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+  <text x="890" y="192" text-anchor="middle" class="s" fill="var(--ink)">destination_key → final URL</text>
+  <text x="890" y="210" text-anchor="middle" class="s" fill="var(--ink-3)">keep_single_header · UTF-8 BOM</text>
+  <text x="890" y="226" text-anchor="middle" class="s" fill="var(--oxide)">combine fail → first successful batch</text>
+</svg>
+<figcaption><strong>Products are not batched here.</strong> QueryHandler marks id <code>100</code> as <code>split_query=True</code> (multi-statement temp tables). The executor always constructs <code>QueryParams(..., split_query=False)</code>, so that flag is unused on the live path. A products SQL file that is several <code>CREATE TEMPORARY TABLE</code> statements plus a <code>SELECT</code> is sent as one command only if ClickHouse accepts it that way.</figcaption>
+</figure>
+
+    <div class="col">
+      <p>
+        The combine payload lists S3 keys (directory + filename, query string
+        stripped), <code>mode: "sync"</code>,
+        <code>callback: {kind: "none"}</code>, and a
+        <code>reference_id</code> equal to the audit id. Default URL:
+        <code>http://s3obj-materializer.tools.svc.cluster.local:8080</code>,
+        overridable with <code>CSV_COMBINE_SERVICE_URL</code>.
+      </p>
+      <p>
+        Zero successful batches → <code>success=False</code>, executor raises
+        <code>RuntimeError</code>. Partial success plus a failed combine still
+        returns <code>success=True</code> if any batch link exists.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">07</span>
+      <h2>Queries on disk</h2>
+    </div>
+    <div class="col">
+      <p>
+        <code>QueryHandler</code> loads every <code>.sql</code> and
+        <code>.json</code> under <code>app/queries/</code> at init. Export
+        type is the Kafka <code>id</code>, mapped by a hardcoded dict.
+        Substitution is not Jinja. <code>queryParser.Parser</code> is a port
+        of the TypeScript parser: required <code>{{param}}</code>, optional
+        blocks <code>[[ ... {{param}} ... ]]</code> dropped when any inner
+        param is missing, lists expanded to comma-separated quoted values.
+      </p>
+    </div>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr><th>Kafka id</th><th>Template</th><th>Preprocess</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">11358</td>
+            <td>CUSTOMERS_EXPORT_QUERY</td>
+            <td>scope_id; orders_count / total_purchases / abandoned-cart / whitelist conditions</td>
+            <td>Single query</td>
+          </tr>
+          <tr>
+            <td class="mono">2</td>
+            <td>SHIPPING_COD_PAYMENT_EXPORT_QUERY</td>
+            <td>—</td>
+            <td>Single query</td>
+          </tr>
+          <tr>
+            <td class="mono">3</td>
+            <td>STORE_TAX_INVOICES_EXPORT_QUERY</td>
+            <td>—</td>
+            <td>Single query</td>
+          </tr>
+          <tr>
+            <td class="mono">4</td>
+            <td>STORE_CREDIT_NOTES_EXPORT_QUERY</td>
+            <td>—</td>
+            <td>Single query</td>
+          </tr>
+          <tr>
+            <td class="mono">777777</td>
+            <td>ORDERS_EXPORT_QUERY (+ _COLUMNS / _COLUMNMAP)</td>
+            <td>scope_id default 0; from_date / to_date → int</td>
+            <td>Date-range batching. Arabic aliases in COLUMNMAP (SQL expressions, not labels only)</td>
+          </tr>
+          <tr>
+            <td class="mono">888888</td>
+            <td>ORDER_ITEMS_EXPORT_QUERY (+ COLUMNMAP)</td>
+            <td>same as orders</td>
+            <td>Date-range batching</td>
+          </tr>
+          <tr>
+            <td class="mono">100</td>
+            <td>PRODUCTS_EXPORT_QUERY (+ COLUMNMAP)</td>
+            <td>status list → <code>status-*</code> keys; drop <code>vendors</code> unless <code>"1"</code></td>
+            <td>Marked split; executor does not split. Column drops when <code>export_for_update</code> or <code>multi_countries</code></td>
+          </tr>
+          <tr>
+            <td class="mono">200</td>
+            <td>TEST_QUERY_NOW</td>
+            <td>—</td>
+            <td><code>select * from demo_tables.orders1</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col" style="margin-top:22px">
+      <p>
+        If <code>columns</code> is a non-empty list, the handler loads
+        <code>{NAME}_COLUMNS.sql</code>, replaces <code>[[columns]]</code>
+        with the comma-separated expressions from COLUMNMAP (filtered by
+        selection and product rules), then parses. Empty list skips that
+        path. After parse, the SQL is written to <code>output.sql</code> in
+        the working directory — a debug leftover on the live path.
+      </p>
+      <p>
+        <code>products_preprocess_loyalty_points</code> exists on
+        <code>PreprocessHandler</code> and is not in the
+        <code>preprocess_params</code> dispatcher for id <code>100</code>.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">08</span>
+      <h2>Who does what</h2>
+    </div>
+    <div class="col">
+      <p>
+        One class per concern, types in a sibling <code>*Types.py</code>.
+        Almost every public method is wrapped in
+        <code>@error_handler.capture</code>. The decorator increments a step
+        counter, logs completion to Graylog, and on exception writes
+        <code>logs/errors.log</code> and a GELF error. <code>reraise</code>
+        defaults to <code>False</code>, so a decorated failure returns
+        <code>None</code> unless the caller also has its own try/except.
+      </p>
+    </div>
+
+    <div class="filemap" style="margin-top:8px">
+      <div class="frow">
+        <div class="path">consumer.py</div>
+        <div class="what"><b>Image entrypoint.</b> Sequential poll, chunk, wait, sleep. SIGINT/SIGTERM. Secure Kafka when WORKER_ENV is production or stage.</div>
+      </div>
+      <div class="frow">
+        <div class="path">consumer_queue.py</div>
+        <div class="what"><b>Queue + workers.</b> Backpressure at QUEUE_MAX_SIZE. Commits after Popen. Test and priority filters. Graceful drain + poison pills.</div>
+      </div>
+      <div class="frow">
+        <div class="path">consumer_batches.py</div>
+        <div class="what"><b>Batch or semaphore.</b> USE_BATCHING (default true). 5s idle flush. USE_BATCHING=false starts a daemon thread per message limited by MAX_CONCURRENT_PROCESSES.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/kafkaConsumeExecutor.py</div>
+        <div class="what"><b>The job.</b> Filters, handlers, Redis, ParallelBatchHandler, row count, XLSX, email, Graylog timings. CLI <code>--message</code>.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/messageHandler/</div>
+        <div class="what"><b>Contract of the Kafka JSON.</b> EventPayload + field cleanup. Does not touch SQL.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/queryHandler/ + queryParser.py</div>
+        <div class="what"><b>Templates to SQL.</b> ID map, file load, Parser, column injection. Side-writes output.sql.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/preprocessHandler/</div>
+        <div class="what"><b>Param rewrite by export id.</b> Dates to ints, status expansion, numeric operator fragments, product column removals.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/clickhouseHandler/</div>
+        <div class="what"><b>HTTP client + S3 function.</b> Session id <code>exp_{rand}_{ms}</code>. split_query path replaces <code>&lt;full-file-path&gt;</code> placeholders. default_params (max_result_rows 180000, overflow break) are stored and not passed into get_client.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/parallelBatchHandler/</div>
+        <div class="what"><b>Date slicing + combine HTTP.</b> Only orders and order items. Fallback to first batch if combine fails.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/rowCountHandler/</div>
+        <div class="what"><b>XLSX size check.</b> Three count queries. skip_xlsx used; is_large_export unused by the executor.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/excelConverterHandler/</div>
+        <div class="what"><b>CSV download → pandas → MinIO.</b> Live path is _convert_to_xlsx_pd. Binary converter remains unused.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/emailHandler/</div>
+        <div class="what"><b>MJML then send.</b> Template email.eta.html, default Arabic body, logo at cdn.salla.network. SMTP definition shadows Mailgun/SES dispatch. Mailgun talks to api.eu.mailgun.net / salla.email with MAILGUN_KEY. SES needs SES_REGION, SES_ACCESS_ID, SES_ACCESS_SECRET. Optional EXPORTER_BCC_EMAIL.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/redisHandler/</div>
+        <div class="what"><b>Lock then cache.</b> REDIS_URL. Env-prefixed keys. Errors become “new”.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/postgresHandler/</div>
+        <div class="what"><b>Lifecycle table.</b> queued → running → combining → emailing → succeeded | failed. Never raises. Off without PG_HOST.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/graylogHandler/</div>
+        <div class="what"><b>GELF.</b> graypy UDP/TCP or HTTP POST /gelf. Typed helpers: info, email, error, processing, processing_info, websocket_activity, send_log.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/errorHandler/</div>
+        <div class="what"><b>Singleton decorator.</b> globalErrorHandler.error_handler. Step log on success; file + Graylog on failure; reraise off.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/websocketHandler/</div>
+        <div class="what"><b>Written, not wired.</b> Centrifugo-style POST /api, channel store_{id}_user_{id}, bilingual progress strings, WS_LOG_LEVEL default 0. Executor never imports it.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/optimusHandler/</div>
+        <div class="what"><b>Written, not wired from the executor.</b> Knuth multiplicative hashing, dual legacy/main configs from OPTIMUS_* env vars. Used only if WebSocket logs a terminal event.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">09</span>
+      <h2>Runtime and delivery</h2>
+    </div>
+    <div class="col">
+      <p>
+        Image is <code>python:3.11-slim</code>, pip from
+        <code>requirements.txt</code>, copies <code>app/</code>,
+        <code>consumer.py</code>, <code>consumer_batches.py</code>. GitHub
+        Actions on master and pull requests: Twingate, AWS credentials in
+        <code>eu-central-1</code>, ECR login, <code>docker build -t
+        $IMAGE_NAME:python-latest</code>, tag
+        <code>python-{new_tag}</code> and, on non-master,
+        <code>stage-python-{branch}</code>. The workflow file names the image
+        <code>email-exporter</code> under the prod registry secret. PR title
+        and branch name are linted (semantic types + JIRA-like scopes;
+        <code>bugfix|hotfix|feature/…</code>).
+      </p>
+    </div>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr><th>Compose service</th><th>Role in local stack</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="mono">zookeeper + kafka</td><td>Debezium images; advertised INSIDE :9092 / OUTSIDE :9094</td></tr>
+          <tr><td class="mono">connect</td><td>Debezium Kafka Connect on 8083 — not used by this consumer</td></tr>
+          <tr><td class="mono">postgres</td><td>Database for Conduktor Platform, not the exporter’s PG_HOST unless you point it there</td></tr>
+          <tr><td class="mono">conduktor-platform</td><td>UI on 8087 ← 8080, config from dockerCompose/scripts/conduktor.yaml</td></tr>
+          <tr><td class="mono">redis</td><td>redis:7-alpine :6379, AOF on</td></tr>
+          <tr><td class="mono">minio</td><td>:9000 API / :9001 console</td></tr>
+          <tr><td class="mono">clickhouse</td><td>clickhouse-server:24.8, HTTP 8123, native remapped to 9002; init creates kafka_tables and demo_tables</td></tr>
+          <tr><td class="mono">mjml</td><td>annycompany/mjml-server on host port 80</td></tr>
+          <tr><td class="mono">mailhog</td><td>SMTP 1025, UI 8025 — matches the SMTP send_email that currently wins</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col" style="margin-top:28px">
+      <h3>Packages actually imported</h3>
+      <p>
+        <code>pydantic</code>, <code>redis</code>,
+        <code>clickhouse_connect</code>, <code>requests</code>,
+        <code>pandas</code>, <code>confluent_kafka</code>,
+        <code>minio</code>, <code>graypy</code>,
+        <code>psycopg2</code> (via psycopg2-binary), <code>boto3</code>,
+        <code>jinja2</code>, <code>dotenv</code>. The requirement line
+        <code>mjml</code> is unused; rendering is the HTTP server.
+        <code>python-dotenv</code> is imported as <code>dotenv</code>.
+      </p>
+    </div>
+
+    <div class="note" style="margin-top:18px">
+      <p class="hd">Environment names, not values</p>
+      <p>
+        Kafka: <code>KAFKA_BROKERS</code>, <code>KAFKA_GROUP_ID</code>,
+        <code>KAFKA_TOPIC</code>, <code>KAFKA_USERNAME</code>,
+        <code>KAFKA_PASSWORD</code>, <code>WORKER_ENV</code>.
+        ClickHouse: <code>CLICKHOUSE_URL</code>, <code>CLICKHOUSE_USER</code>,
+        <code>CLICKHOUSE_PASSWORD</code>, <code>CLICKHOUSE_DATABASE</code>.
+        Object storage: <code>S3_ENDPOINT</code>, <code>S3_BUCKET</code>,
+        <code>S3_DIR_PATH</code>, <code>S3_ACCESS_ID</code>,
+        <code>S3_ACCESS_SECRET</code>.
+        Mail: <code>MJML_URL</code>, <code>EXPORTER_SEND_EMAIL_FROM</code>,
+        <code>MAILGUN_KEY</code>, <code>EMAIL_PROVIDER</code>,
+        <code>SES_REGION</code>, <code>SES_ACCESS_ID</code>,
+        <code>SES_ACCESS_SECRET</code>, <code>EXPORTER_BCC_EMAIL</code>.
+        Redis: <code>REDIS_URL</code>. Postgres: <code>PG_HOST</code> and
+        siblings. Graylog: <code>GRAYLOG_ADAPTER_NAME</code>,
+        <code>GRAYLOG_ADAPTER_HOST</code>, <code>GRAYLOG_ADAPTER_PORT</code>.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">10</span>
+      <h2>Decisions the code made</h2>
+    </div>
+    <div class="col">
+      <p>
+        These are visible in the repository as it is, including where later
+        markdown disagrees with it. IMPLEMENTATION.md and MISSING.md describe
+        an earlier cut. The executor already has parallel batching, Redis
+        locks, Postgres types, row counts, Mailgun, and SES — and it also
+        has the gaps below.
+      </p>
+    </div>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr><th>Decision</th><th>What the code does</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Process isolation</td>
+            <td>Every message is a new Python interpreter. Handlers, ClickHouse sessions, and MinIO clients are not reused across messages.</td>
+          </tr>
+          <tr>
+            <td>Push-down export</td>
+            <td>ClickHouse writes CSV to S3. Python holds a URL, not the dataset — except during XLSX conversion, which downloads the whole CSV.</td>
+          </tr>
+          <tr>
+            <td>Dedup is parameters, not payload</td>
+            <td>Same store + export id + params inside 15 minutes shares a file. Different recipients still share that cache key.</td>
+          </tr>
+          <tr>
+            <td>Continue on sidecar failure</td>
+            <td>Postgres, Redis cache write, WebSocket, and combine-service errors are logged. Combine failure degrades to a partial file rather than failing the email.</td>
+          </tr>
+          <tr>
+            <td>Test traffic is inverted by env</td>
+            <td>Production refuses tests. Development and stage refuse non-tests. That filter lives in the executor (always) and in the queue consumer (before spawn).</td>
+          </tr>
+          <tr>
+            <td>latest, not earliest</td>
+            <td>A new consumer group ignores the backlog.</td>
+          </tr>
+          <tr>
+            <td>Secure Kafka only in named envs</td>
+            <td>PLAINTEXT unless WORKER_ENV is production or stage.</td>
+          </tr>
+          <tr>
+            <td>Email send currently SMTP</td>
+            <td>A second <code>send_email</code> definition wins. Local compose therefore matches MailHog; Mailgun/SES need that shadowing removed before they can run from the executor.</td>
+          </tr>
+          <tr>
+            <td>Progress UI not connected</td>
+            <td>WebSocketPublisher and Optimus are complete modules. kafkaConsumeExecutor does not call them, so merchants do not get in-app steps from this process.</td>
+          </tr>
+          <tr>
+            <td>Batching ≠ row-count “large”</td>
+            <td>24-way split is by export id and dates, not by the 30&nbsp;000-row flag computed afterwards.</td>
+          </tr>
+          <tr>
+            <td>Capture does not re-raise</td>
+            <td>Decorated handler errors can vanish into Graylog while the executor proceeds with <code>None</code>, unless a surrounding try/except sees a later TypeError.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid-3" style="margin-top:28px">
+      <div class="card oxide">
+        <h3>NameError on CH log</h3>
+        <p style="font-size:.9rem;color:var(--ink-2);margin:0">
+          <code>clickhouseHandlerClass.py</code> calls <code>logger.info</code>
+          without creating a logger. The first successful write path logs
+          the S3 URL after the insert; that line raises if it is reached.
+        </p>
+      </div>
+      <div class="card amber">
+        <h3>Hardcoded bucket in XLSX</h3>
+        <p style="font-size:.9rem;color:var(--ink-2);margin:0">
+          ClickHouse uses <code>S3_BUCKET</code>. ExcelConverterHandler is
+          constructed with <code>s3_bucket = "exports"</code> in the executor.
+        </p>
+      </div>
+      <div class="card cool">
+        <h3>Default body is Arabic</h3>
+        <p style="font-size:.9rem;color:var(--ink-2);margin:0">
+          <code>get_body_text</code> is a single Arabic sentence interpolating
+          the subject. <code>locale</code> on the payload is not consulted
+          for that string. The MJML template is <code>direction="rtl"</code>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="num">11</span>
+      <h2>A message, as the code sees it</h2>
+    </div>
+    <div class="col">
+      <p>
+        Shape from <code>EventPayload</code> plus the <code>live</code> field
+        the consumers read (not on the Pydantic model — extra keys are
+        ignored there).
+      </p>
+    </div>
+<pre style="margin-top:8px"><code>{
+  "id": "777777",
+  "live": false,
+  "type": "xlsx",
+  "subject": "Orders export",
+  "to": ["merchant@example.com"],
+  "body": null,
+  "user_id": 12345,
+  "priority": 1,
+  "locale": "ar",
+  "parameters": {
+    "store_id": 67890,
+    "from_date": "2026-01-01",
+    "to_date": "2026-01-31"
+  },
+  "columns": ["order_id", "customer_name", "order_total"],
+  "color": "#000000",
+  "bgColor": "#5dd5c4",
+  "titleColor": "#5dd5c4ff"
+}</code></pre>
+    <div class="col" style="margin-top:22px">
+      <p>
+        With that payload the executor would: pass filters (if not in
+        development without <code>is_test</code>), lock Redis, split January
+        into 24 ClickHouse exports, combine, count rows, skip or run pandas
+        XLSX, render MJML, SMTP the link, cache it for 15 minutes.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <p style="margin:0 0 .6rem">
+      <strong style="color:var(--ink-2)">email-exporter-consumer-python</strong>
+      — a Kafka consumer that exports ClickHouse query templates to
+      S3-compatible storage and emails a download link. Drawn from the
+      Python sources, Dockerfile, compose file, and GitHub workflows — not
+      from IMPLEMENTATION.md where that file lags the code.
+    </p>
+    <p class="mono" style="font-size:.76rem;margin:0">
+      No values from .env. Secret names only where the code reads them.
+    </p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById('theme-toggle');
+  var stored = null;
+  try { stored = localStorage.getItem('exporter-flow-theme'); } catch (e) {}
+  if (stored === 'light' || stored === 'dark') {
+    root.setAttribute('data-theme', stored);
+  }
+  function label() {
+    var now = root.getAttribute('data-theme');
+    if (now === 'dark') btn.textContent = 'Light';
+    else if (now === 'light') btn.textContent = 'Dark';
+    else btn.textContent = 'Theme';
+  }
+  label();
+  btn.addEventListener('click', function () {
+    var current = root.getAttribute('data-theme');
+    if (!current) {
+      current = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    var next = current === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('exporter-flow-theme', next); } catch (e) {}
+    label();
+  });
+})();
+</script>
+</body>
+</html>

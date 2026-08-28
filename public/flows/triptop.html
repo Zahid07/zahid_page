@@ -1,0 +1,1416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trip Top — how the system is shaped</title>
+<meta name="description" content="Architecture of Trip Top: Flask /api/v1, a PostgreSQL snowflake schema, and the Flutter client that talks to both.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --paper:      #F1F3F2;
+    --surface:    #FAFBFA;
+    --surface-2:  #E7EBE9;
+    --ink:        #16201F;
+    --ink-2:      #3E4C4A;
+    --ink-3:      #6B7A77;
+    --rule:       #CFD8D5;
+    --rule-soft:  #DFE5E3;
+    --pine:       #0F6E63;
+    --pine-soft:  #DCEBE8;
+    --amber:      #9A5B00;
+    --amber-soft: #F5E8D2;
+    --oxide:      #9E2B18;
+    --oxide-soft: #F6DED9;
+    --shadow: 0 1px 2px rgba(22,32,31,.06), 0 8px 24px -12px rgba(22,32,31,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0E1413;
+      --surface:    #151D1C;
+      --surface-2:  #1E2827;
+      --ink:        #E4EAE8;
+      --ink-2:      #B0BEBB;
+      --ink-3:      #7F8F8C;
+      --rule:       #2C3937;
+      --rule-soft:  #222D2C;
+      --pine:       #5FC4B4;
+      --pine-soft:  #12312D;
+      --amber:      #D99A4E;
+      --amber-soft: #33240F;
+      --oxide:      #E08575;
+      --oxide-soft: #381914;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #0E1413;
+    --surface:    #151D1C;
+    --surface-2:  #1E2827;
+    --ink:        #E4EAE8;
+    --ink-2:      #B0BEBB;
+    --ink-3:      #7F8F8C;
+    --rule:       #2C3937;
+    --rule-soft:  #222D2C;
+    --pine:       #5FC4B4;
+    --pine-soft:  #12312D;
+    --amber:      #D99A4E;
+    --amber-soft: #33240F;
+    --oxide:      #E08575;
+    --oxide-soft: #381914;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 24px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  .col  { max-width: 68ch; }
+
+  h1, h2, h3, .label, .stage-n, th, .mono, .l { font-family: "Archivo", "Helvetica Neue", Arial, sans-serif; }
+
+  h1 {
+    font-size: clamp(2.1rem, 5vw, 3.1rem);
+    font-weight: 700;
+    letter-spacing: -.025em;
+    line-height: 1.05;
+    text-wrap: balance;
+    margin: 0 0 .5rem;
+  }
+  h2 {
+    font-size: clamp(1.35rem, 2.4vw, 1.7rem);
+    font-weight: 600;
+    letter-spacing: -.015em;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h3 {
+    font-size: 1.02rem;
+    font-weight: 600;
+    letter-spacing: -.005em;
+    margin: 0 0 .4rem;
+  }
+  p { margin: 0 0 1.05rem; }
+  a { color: var(--pine); text-underline-offset: 3px; }
+  strong { font-weight: 600; }
+  em { font-style: italic; color: var(--ink-2); }
+
+  .label {
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .lede {
+    font-size: 1.16rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 60ch;
+  }
+
+  code, .mono, pre, .m, .s { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+  code {
+    font-size: .85em;
+    background: var(--surface-2);
+    padding: .12em .38em;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 6px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: .82rem;
+    line-height: 1.6;
+    margin: 0 0 1.05rem;
+    color: var(--ink-2);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  header.masthead {
+    padding: 72px 0 40px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .kicker {
+    display: flex; gap: 14px; align-items: baseline;
+    margin-bottom: 22px; flex-wrap: wrap;
+  }
+  .kicker .sep { color: var(--rule); }
+  .mast-row {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 18px;
+  }
+  .theme-btn {
+    font-family: "Archivo", sans-serif;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase;
+    background: var(--surface);
+    color: var(--ink-2);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: .45em .8em;
+    cursor: pointer;
+    flex: none;
+  }
+  .theme-btn:hover { border-color: var(--pine); color: var(--pine); }
+  .byline {
+    margin-top: 1.8rem;
+    display: flex; flex-wrap: wrap; gap: .5rem 1.3rem;
+    font-family: "JetBrains Mono", monospace;
+    font-size: .76rem; color: var(--ink-3);
+  }
+  .byline span { display: inline-flex; align-items: center; gap: .45rem; }
+  .byline span::before {
+    content: ""; width: 5px; height: 5px;
+    background: var(--pine); border-radius: 50%; flex: none;
+  }
+
+  .strip {
+    display: flex; gap: .4rem; overflow-x: auto;
+    padding: 1.4rem 0 1.1rem;
+    scrollbar-width: thin;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .stage-chip {
+    flex: 1 1 0; min-width: 118px; text-decoration: none; color: inherit;
+    border: 1px solid var(--rule); border-radius: 4px; background: var(--surface);
+    padding: .62rem .7rem .68rem; display: block;
+  }
+  .stage-chip:hover { border-color: var(--pine); }
+  .stage-chip .n {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .7rem; color: var(--pine); font-weight: 500;
+  }
+  .stage-chip .t {
+    font-family: "Archivo", sans-serif;
+    font-size: .82rem; font-weight: 600; margin-top: .28rem; display: block;
+  }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--rule-soft); }
+  section:last-of-type { border-bottom: none; }
+  .sec-head { display: flex; gap: 18px; align-items: baseline; margin-bottom: 28px; }
+  .sec-head .num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; font-weight: 700;
+    color: var(--pine);
+    padding-top: .35em;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+
+  .pipeline { display: flex; flex-direction: column; gap: 0; margin-top: 8px; }
+  .stage {
+    display: grid;
+    grid-template-columns: 58px 1fr;
+    gap: 22px;
+    position: relative;
+    padding: 22px 0;
+  }
+  .stage:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: 28px; top: 56px; bottom: -6px;
+    width: 2px;
+    background: linear-gradient(var(--rule), var(--rule-soft));
+  }
+  .stage-n {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--surface);
+    border: 2px solid var(--rule);
+    font-size: .82rem; font-weight: 700;
+    color: var(--ink-2);
+    position: relative; z-index: 1;
+  }
+  .stage.live .stage-n { border-color: var(--pine); color: var(--pine); }
+  .stage.schema .stage-n { border-color: var(--amber); color: var(--amber); }
+  .stage-body { padding-top: 4px; min-width: 0; }
+  .stage-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  .stage-body p { margin-bottom: .7rem; max-width: 62ch; }
+
+  .chip {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .64rem; font-weight: 500;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: .25em .6em; border-radius: 3px;
+    white-space: nowrap;
+  }
+  .chip.live   { background: var(--pine-soft); color: var(--pine); }
+  .chip.schema { background: var(--amber-soft); color: var(--amber); }
+  .chip.gap    { background: var(--oxide-soft); color: var(--oxide); }
+
+  .gate {
+    border-left: 3px solid var(--amber);
+    background: var(--amber-soft);
+    padding: 10px 14px;
+    border-radius: 0 4px 4px 0;
+    font-size: .9rem;
+    color: var(--ink);
+    max-width: 62ch;
+  }
+  .gate .label { color: var(--amber); display: block; margin-bottom: 2px; }
+  .gate.stop { border-left-color: var(--oxide); background: var(--oxide-soft); }
+  .gate.stop .label { color: var(--oxide); }
+
+  .t-wrap { overflow-x: auto; border: 1px solid var(--rule-soft); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th {
+    text-align: left;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { color: var(--ink); }
+  td.num { font-family: "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+
+  .filemap {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .frow {
+    display: grid;
+    grid-template-columns: minmax(190px, 280px) 1fr;
+    gap: 20px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--rule-soft);
+    align-items: baseline;
+  }
+  .frow:last-child { border-bottom: none; }
+  .frow .path {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .8rem;
+    color: var(--pine);
+    word-break: break-word;
+  }
+  .frow .what { font-size: .93rem; color: var(--ink-2); }
+  .frow .what b { color: var(--ink); font-weight: 600; }
+
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--pine);
+    border-radius: 0 6px 6px 0;
+    padding: 16px 20px;
+    max-width: 66ch;
+  }
+  .note.warn { border-left-color: var(--amber); }
+  .note.stop { border-left-color: var(--oxide); }
+  .note p:last-child { margin-bottom: 0; }
+  .note .hd {
+    font-family: "Archivo", sans-serif;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--pine); margin: 0 0 .4rem;
+  }
+  .note.warn .hd { color: var(--amber); }
+  .note.stop .hd { color: var(--oxide); }
+
+  .tier {
+    border: 1px solid var(--rule);
+    border-top-width: 3px;
+    border-radius: 6px;
+    padding: 16px 18px;
+    background: var(--surface);
+  }
+  .tier.allow { border-top-color: var(--pine); }
+  .tier.ask   { border-top-color: var(--amber); }
+  .tier.deny  { border-top-color: var(--oxide); }
+  .tier ul { margin: 0; padding-left: 1.1em; font-size: .88rem; color: var(--ink-2); }
+  .tier li { margin-bottom: 5px; }
+
+  figure {
+    margin: 1.9rem 0 1rem;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 1.5rem 1.3rem 1.1rem;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  figcaption {
+    font-family: "Archivo", sans-serif;
+    font-size: .75rem; color: var(--ink-3);
+    margin-top: 1rem; padding-top: .85rem;
+    border-top: 1px solid var(--rule);
+    line-height: 1.5;
+  }
+  svg { display: block; max-width: 100%; height: auto; }
+  .l { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .m { font-size: 11px; }
+  .s { font-size: 10px; }
+
+  ul { margin: 0 0 1.05rem; padding-left: 1.25rem; }
+  li { margin-bottom: .4rem; }
+
+  footer {
+    padding-top: 40px;
+    color: var(--ink-3);
+    font-size: .88rem;
+    border-top: 1px solid var(--rule-soft);
+    margin-top: 20px;
+  }
+
+  :focus-visible { outline: 2px solid var(--pine); outline-offset: 2px; border-radius: 2px; }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; padding: 0 18px 64px; }
+    .stage { grid-template-columns: 40px 1fr; gap: 16px; }
+    .stage-n { width: 40px; height: 40px; font-size: .72rem; }
+    .stage:not(:last-child)::after { left: 19px; top: 42px; }
+    .frow { grid-template-columns: 1fr; gap: 4px; }
+    .sec-head { gap: 12px; }
+    .mast-row { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="kicker">
+      <span class="label">Trip Top</span>
+      <span class="sep">/</span>
+      <span class="label">Åbo Akademi · Project Course</span>
+      <span class="sep">/</span>
+      <span class="label">MVP</span>
+    </div>
+    <div class="mast-row">
+      <div>
+        <h1>How a booking<br>becomes a row</h1>
+        <p class="lede">
+          A Flutter client talks JSON to a Flask API. The API does not invent SQL —
+          it loads files from <code>app/queries/allQueries/</code> and runs them against
+          a PostgreSQL snowflake whose grain is one student on one trip.
+        </p>
+      </div>
+      <button type="button" class="theme-btn" id="theme-toggle" aria-label="Toggle colour theme">Theme</button>
+    </div>
+    <div class="byline">
+      <span>Backend + schema: this repository</span>
+      <span>Client: Flutter in <code>trip_top_frontend_new</code></span>
+      <span>Contract: <code>/api/v1</code> · Flasgger</span>
+    </div>
+  </header>
+
+  <nav class="strip" aria-label="End-to-end stages">
+    <a class="stage-chip" href="#s-register"><span class="n">01</span><span class="t">Register</span></a>
+    <a class="stage-chip" href="#s-auth"><span class="n">02</span><span class="t">Authenticate</span></a>
+    <a class="stage-chip" href="#s-catalog"><span class="n">03</span><span class="t">Catalog</span></a>
+    <a class="stage-chip" href="#s-compose"><span class="n">04</span><span class="t">Compose trip</span></a>
+    <a class="stage-chip" href="#s-book"><span class="n">05</span><span class="t">Book</span></a>
+    <a class="stage-chip" href="#s-attend"><span class="n">06</span><span class="t">Attend</span></a>
+  </nav>
+
+  <!-- 01 shape -->
+  <section>
+    <div class="sec-head">
+      <span class="num">01</span>
+      <h2>The shape of the system</h2>
+    </div>
+    <div class="col">
+      <p>
+        Trip Top is a student-trip marketplace. An <em>organization</em> (a student union,
+        a travel club) publishes a trip. A <em>customer</em> (a student, often matched to a
+        Finnish university email domain) books a seat. <em>Staff</em> belong to the
+        organization. The schema comments still say TripMate; the Flutter shell, the
+        Docker service, and this folder are Trip Top.
+      </p>
+      <p>
+        Three processes, one wire. They never share a database handle. They meet at HTTP.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 340" role="img" aria-label="Flutter client, Flask API, SQL files, and PostgreSQL">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="16" y="70" width="210" height="170" rx="8" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+        <text x="121" y="56" text-anchor="middle" class="l" fill="var(--pine)">Client</text>
+        <text x="121" y="108" text-anchor="middle" class="l" fill="var(--pine)">Flutter</text>
+        <text x="121" y="132" text-anchor="middle" class="s" fill="var(--ink-2)">package:http</text>
+        <text x="121" y="150" text-anchor="middle" class="s" fill="var(--ink-2)">Material 3</text>
+        <text x="121" y="176" text-anchor="middle" class="s" fill="var(--ink-2)">role_id 1 → admin home</text>
+        <text x="121" y="192" text-anchor="middle" class="s" fill="var(--ink-2)">role_id 2/3 → stub home</text>
+        <text x="121" y="216" text-anchor="middle" class="m" fill="var(--pine)">LAN :8080 hardcoded</text>
+
+        <line x1="226" y1="155" x2="268" y2="155" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#arr)"/>
+        <text x="247" y="144" text-anchor="middle" class="s" fill="var(--ink-3)">JSON</text>
+
+        <rect x="272" y="48" width="300" height="214" rx="8" fill="var(--surface-2)" stroke="var(--rule)" stroke-width="1.6"/>
+        <text x="422" y="36" text-anchor="middle" class="l" fill="var(--ink)">API</text>
+        <text x="422" y="84" text-anchor="middle" class="l" fill="var(--ink)">Flask · app.py</text>
+        <text x="422" y="108" text-anchor="middle" class="s" fill="var(--ink-2)">host 0.0.0.0 :8080</text>
+        <text x="422" y="126" text-anchor="middle" class="s" fill="var(--ink-2)">url_prefix /api/v1</text>
+        <text x="422" y="144" text-anchor="middle" class="s" fill="var(--ink-2)">23 blueprints</text>
+        <text x="422" y="170" text-anchor="middle" class="s" fill="var(--ink-2)">Flasgger /apidocs</text>
+        <text x="422" y="188" text-anchor="middle" class="s" fill="var(--ink-2)">PyJWT HS256 · 24 h</text>
+        <text x="422" y="214" text-anchor="middle" class="s" fill="var(--ink-2)">OTP → SMTP (Gmail)</text>
+        <text x="422" y="240" text-anchor="middle" class="m" fill="var(--ink)">python app/app.py</text>
+
+        <line x1="572" y1="120" x2="618" y2="88" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="572" y1="170" x2="618" y2="210" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <rect x="622" y="36" width="214" height="110" rx="8" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="1.6"/>
+        <text x="729" y="24" text-anchor="middle" class="l" fill="var(--amber)">Query files</text>
+        <text x="729" y="72" text-anchor="middle" class="l" fill="var(--amber)">allQueries/*.sql</text>
+        <text x="729" y="96" text-anchor="middle" class="s" fill="var(--ink-2)">:param string replace</text>
+        <text x="729" y="122" text-anchor="middle" class="s" fill="var(--amber)">not an ORM</text>
+
+        <rect x="622" y="172" width="214" height="110" rx="8" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+        <text x="729" y="160" text-anchor="middle" class="l" fill="var(--pine)">Store</text>
+        <text x="729" y="208" text-anchor="middle" class="l" fill="var(--pine)">PostgreSQL 12</text>
+        <text x="729" y="232" text-anchor="middle" class="s" fill="var(--ink-2)">host port 5433</text>
+        <text x="729" y="256" text-anchor="middle" class="s" fill="var(--pine)">snowflake + lookups</text>
+
+        <rect x="860" y="88" width="200" height="154" rx="8" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="960" y="76" text-anchor="middle" class="l" fill="var(--ink-3)">Compose</text>
+        <text x="960" y="124" text-anchor="middle" class="m" fill="var(--ink)">database/</text>
+        <text x="960" y="144" text-anchor="middle" class="s" fill="var(--ink-2)">postgres :5433</text>
+        <text x="960" y="168" text-anchor="middle" class="m" fill="var(--ink)">backend/</text>
+        <text x="960" y="188" text-anchor="middle" class="s" fill="var(--ink-2)">python:3.10 :8080</text>
+        <text x="960" y="214" text-anchor="middle" class="s" fill="var(--ink-3)">host.docker.internal</text>
+
+        <text x="16" y="292" class="s" fill="var(--ink-3)">Env names only: POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRESQL_HOST, POSTGRESQL_PORT, JWT_SECRET_KEY.</text>
+        <text x="16" y="310" class="s" fill="var(--ink-3)">Config.PORT = 5000 in app/config.py is unused. The process that actually listens is app.run(..., port=8080).</text>
+      </svg>
+      <figcaption>
+        <strong>The seam is HTTP, not a shared library.</strong>
+        The Flutter tree lives in a sibling folder. This repository is the API, the SQL,
+        and the schema. Docker Compose under <code>backend/</code> bind-mounts <code>../app</code>
+        and talks to Postgres on the host via <code>host.docker.internal</code>.
+      </figcaption>
+    </figure>
+
+    <div class="grid-2" style="margin-top:8px">
+      <div class="note">
+        <p class="hd">One request, six hops</p>
+        <p style="font-size:.93rem;color:var(--ink-2)">
+          Blueprint → JSON body → <code>getQuery.get_query(name)</code> →
+          <code>preProcessParameters</code> (<code>:key</code> replaced, longest first) →
+          <code>PostgresConnector</code> (psycopg2, commit on every call) →
+          <code>jsonify</code>.
+        </p>
+      </div>
+      <div class="note warn">
+        <p class="hd">Auth is issued, not enforced</p>
+        <p style="font-size:.93rem;color:var(--ink-2)">
+          Sign-in writes a JWT and a <code>user_sessions</code> row.
+          <code>require_auth</code> exists. No registered route uses it.
+          The admin home still sends <code>Authorization: Bearer</code>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 02 frontend -->
+  <section>
+    <div class="sec-head">
+      <span class="num">02</span>
+      <h2>How the frontend talks to the backend</h2>
+    </div>
+    <div class="col">
+      <p>
+        There is no generated client and no shared config object. Each Dart page
+        constructs <code>Uri.parse('http://&lt;lan-host&gt;:8080/api/v1/…')</code> and
+        calls <code>package:http</code>. Bodies are <code>application/json</code>.
+        Lookups use GET; almost everything else is POST, including reads.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 420" role="img" aria-label="Flutter screens and the API routes they call">
+        <defs>
+          <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <text x="20" y="24" class="l" fill="var(--ink-3)">WelcomeScreen</text>
+        <rect x="16" y="36" width="200" height="56" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="116" y="60" text-anchor="middle" class="m" fill="var(--ink)">Sign In · Sign Up</text>
+        <text x="116" y="78" text-anchor="middle" class="s" fill="var(--ink-3)">no network yet</text>
+
+        <line x1="216" y1="64" x2="256" y2="64" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr2)"/>
+
+        <rect x="260" y="20" width="250" height="88" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="385" y="46" text-anchor="middle" class="l" fill="var(--pine)">SignInPage</text>
+        <text x="385" y="68" text-anchor="middle" class="s" fill="var(--ink-2)">POST /sign_in</text>
+        <text x="385" y="88" text-anchor="middle" class="s" fill="var(--pine)">token, user_id, role_id, org</text>
+
+        <path d="M510 64 L548 64 L548 48 L586 48" fill="none" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr2)"/>
+        <path d="M510 64 L548 64 L548 120 L586 120" fill="none" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr2)"/>
+
+        <rect x="590" y="16" width="250" height="64" rx="6" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="1.8"/>
+        <text x="715" y="42" text-anchor="middle" class="l" fill="var(--pine)">AdminHomePage  ·  role 1</text>
+        <text x="715" y="62" text-anchor="middle" class="s" fill="var(--ink-2)">POST /get_trips  + Bearer</text>
+
+        <rect x="590" y="96" width="250" height="64" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="715" y="122" text-anchor="middle" class="l" fill="var(--ink-2)">HomePage  ·  role 2 or 3</text>
+        <text x="715" y="142" text-anchor="middle" class="s" fill="var(--ink-3)">stub — no API calls</text>
+
+        <line x1="840" y1="48" x2="878" y2="48" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr2)"/>
+        <rect x="882" y="16" width="178" height="64" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="971" y="42" text-anchor="middle" class="l" fill="var(--amber)">TripDetailsPage</text>
+        <text x="971" y="62" text-anchor="middle" class="s" fill="var(--ink-2)">POST /get_trips_itinerary</text>
+
+        <text x="20" y="196" class="l" fill="var(--ink-3)">SignUpPage — pick a role, then a dedicated screen</text>
+
+        <rect x="16" y="214" width="328" height="88" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="180" y="240" text-anchor="middle" class="l" fill="var(--pine)">UserSignUpPage</text>
+        <text x="180" y="260" text-anchor="middle" class="s" fill="var(--ink-2)">GET /get_universities</text>
+        <text x="180" y="276" text-anchor="middle" class="s" fill="var(--ink-2)">POST /generateOTP → /checkOTP</text>
+        <text x="180" y="292" text-anchor="middle" class="s" fill="var(--pine)">then POST /studentSignUp</text>
+
+        <rect x="360" y="214" width="328" height="88" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="524" y="240" text-anchor="middle" class="l" fill="var(--ink)">StaffSignUpPage</text>
+        <text x="524" y="260" text-anchor="middle" class="s" fill="var(--ink-2)">GET /get_organizations</text>
+        <text x="524" y="284" text-anchor="middle" class="s" fill="var(--ink-2)">POST /staff_sign_up</text>
+
+        <rect x="704" y="214" width="356" height="88" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="882" y="240" text-anchor="middle" class="l" fill="var(--ink)">AdminSignUpPage</text>
+        <text x="882" y="260" text-anchor="middle" class="s" fill="var(--ink-2)">slug from org name</text>
+        <text x="882" y="284" text-anchor="middle" class="s" fill="var(--ink-2)">POST /organization_signup</text>
+
+        <text x="20" y="340" class="s" fill="var(--ink-3)">Student email is not typed whole: prefix + @ + universities_lkp.domain. Staff stay pending until someone verifies the profile row.</text>
+        <text x="20" y="360" class="s" fill="var(--ink-3)">After any successful sign-up the app lands on HomePage (the stub), not on a signed-in session. Sign-in is a separate trip through /sign_in.</text>
+        <text x="20" y="388" class="s" fill="var(--ink-3)">Booking, trip create/update/delete, user profile, and get_students exist on the API and are not called from these nine Dart files.</text>
+        <text x="20" y="406" class="s" fill="var(--ink-3)">No CORS middleware — a native Flutter build does not need it. A browser client would.</text>
+      </svg>
+      <figcaption>
+        <strong>The client is role-aware only at navigation.</strong>
+        <code>role_id</code> 1, 2, 3 are assumed to match seed order
+        (<code>admin</code>, <code>staff</code>, <code>customer</code>).
+        Staff and customers currently share a placeholder home.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- 03 request pipeline -->
+  <section>
+    <div class="sec-head">
+      <span class="num">03</span>
+      <h2>One API call, inside the process</h2>
+    </div>
+    <div class="col">
+      <p>
+        Every blueprint copies the same path-append boilerplate so Windows and Linux
+        can both import <code>pgConnector</code>, <code>queriesClass</code>, and
+        <code>preProcessParams</code>. That is the whole data access layer.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 250" role="img" aria-label="Six steps of one Flask request">
+        <defs>
+          <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="12" y="50" width="150" height="86" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="87" y="78" text-anchor="middle" class="l" fill="var(--pine)">1 · Route</text>
+        <text x="87" y="100" text-anchor="middle" class="s" fill="var(--ink-2)">/api/v1/…</text>
+        <text x="87" y="116" text-anchor="middle" class="s" fill="var(--ink-2)">request.get_json</text>
+        <line x1="162" y1="93" x2="192" y2="93" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+        <rect x="196" y="50" width="160" height="86" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="276" y="78" text-anchor="middle" class="l" fill="var(--ink)">2 · Load SQL</text>
+        <text x="276" y="100" text-anchor="middle" class="s" fill="var(--ink-2)">cwd/app/queries/</text>
+        <text x="276" y="116" text-anchor="middle" class="s" fill="var(--ink-2)">allQueries/name.sql</text>
+        <line x1="356" y1="93" x2="386" y2="93" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+        <rect x="390" y="50" width="176" height="86" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="478" y="78" text-anchor="middle" class="l" fill="var(--amber)">3 · Substitute</text>
+        <text x="478" y="100" text-anchor="middle" class="s" fill="var(--ink-2)">:key → str(value)</text>
+        <text x="478" y="116" text-anchor="middle" class="s" fill="var(--ink-2)">longest key first</text>
+        <line x1="566" y1="93" x2="596" y2="93" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+        <rect x="600" y="50" width="176" height="86" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="688" y="78" text-anchor="middle" class="l" fill="var(--pine)">4 · Execute</text>
+        <text x="688" y="100" text-anchor="middle" class="s" fill="var(--ink-2)">psycopg2 connect</text>
+        <text x="688" y="116" text-anchor="middle" class="s" fill="var(--ink-2)">commit always</text>
+        <line x1="776" y1="93" x2="806" y2="93" stroke="var(--ink-3)" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+        <rect x="810" y="50" width="250" height="86" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="935" y="78" text-anchor="middle" class="l" fill="var(--ink)">5 · Shape JSON</text>
+        <text x="935" y="100" text-anchor="middle" class="s" fill="var(--ink-2)">zip(columns, row) or</text>
+        <text x="935" y="116" text-anchor="middle" class="s" fill="var(--ink-2)">positional tuple → keys</text>
+
+        <text x="12" y="176" class="s" fill="var(--ink-3)">Exceptions: delete_trip, get_user_data, update_user_data skip the SQL files and use %s placeholders on a live cursor.</text>
+        <text x="12" y="198" class="s" fill="var(--ink-3)">execute_query / insert_query rollback on error and return None — handlers treat None as 500 or 404.</text>
+        <text x="12" y="230" class="s" fill="var(--ink-3)">A new PostgresConnector is constructed per request. There is no pool and no Flask g.connection.</text>
+      </svg>
+      <figcaption>
+        <strong>SQL is source, Python is plumbing.</strong>
+        Changing a join means editing a <code>.sql</code> file, not a model class.
+        The cost is that <code>:param</code> substitution is not a bound query:
+        quoting is the file author's problem (<code>':email'</code> vs bare <code>:phone</code>).
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- 04 e2e stages -->
+  <section>
+    <div class="sec-head">
+      <span class="num">04</span>
+      <h2>End to end, in six stages</h2>
+    </div>
+    <div class="col">
+      <p>
+        Order is causal, not decorative. A booking cannot exist without a published
+        trip; a trip cannot exist without an organization; a student cannot exist
+        without a role row in <code>user_roles_lkp</code>.
+      </p>
+    </div>
+
+    <div class="pipeline">
+
+      <div class="stage live" id="s-register">
+        <div class="stage-n">01</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Register by role</h3>
+            <span class="chip live">wired</span>
+          </div>
+          <p>
+            Three insert paths, three profile tables. Each looks up
+            <code>user_roles_lkp.role</code> (<code>admin</code> / <code>staff</code> /
+            <code>customer</code>), then does <code>coalesce(max(id),0)+1</code> instead
+            of letting <code>SERIAL</code> mint the key.
+          </p>
+          <p>
+            <strong>Student.</strong> Email is <code>prefix@universities_lkp.domain</code>.
+            OTP (6 digits, 15 minutes, 3 attempts) must verify before
+            <code>/studentSignUp</code>. The university id is written both as
+            <code>users.organization_id</code> and <code>customer_profiles.university_id</code>.
+          </p>
+          <p>
+            <strong>Staff.</strong> Picks an existing organization. Profile
+            <code>verification</code> defaults to <code>Pending</code>.
+          </p>
+          <p>
+            <strong>Admin.</strong> Creates the organization and the admin user in one
+            request. Contact email becomes the user email. Admin profile is a row with
+            <code>is_superadmin</code> left at default false.
+          </p>
+          <div class="gate">
+            <span class="label">Gate — student only</span>
+            OTP must be active, unexpired, under max attempts. Success sets
+            <code>verified</code>, stamps <code>verified_at</code>, and deactivates the row.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage live" id="s-auth">
+        <div class="stage-n">02</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Authenticate</h3>
+            <span class="chip live">issued</span>
+            <span class="chip gap">not on routes</span>
+          </div>
+          <p>
+            <code>POST /sign_in</code> matches <code>email</code> and
+            <code>password_hash</code> as stored. On hit it mints an HS256 JWT
+            (<code>user_id</code>, <code>role_id</code>, 24-hour <code>exp</code>),
+            SHA-256s the token, and inserts <code>user_sessions</code> with IP and
+            User-Agent. The JSON returns the raw token plus <code>organization_id</code>.
+          </p>
+          <p>
+            <code>require_auth</code> would: parse Bearer → verify JWT → hash →
+            <code>verifySession</code> (active row) → expiry check →
+            <code>updateSessionAccess</code> → stash <code>g.current_user</code>.
+            <code>require_role(*ids)</code> would then 403. Neither decorator is
+            applied on the 23 blueprints.
+          </p>
+          <div class="gate stop">
+            <span class="label">Gap</span>
+            Sign-up stores the password string in <code>password_hash</code>.
+            Sign-in compares that string. <code>update_user_data</code> is the exception:
+            it SHA-256s a new password. Those two representations cannot both succeed
+            against <code>signInUser.sql</code>.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage live" id="s-catalog">
+        <div class="stage-n">03</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Read the catalog</h3>
+            <span class="chip live">wired</span>
+          </div>
+          <p>
+            Public GETs fill dropdowns: universities (id, name, country, domain),
+            organizations (id, name), roles. Authenticated-looking POSTs then list
+            an organization's trips (<code>select * from trips where organization_id = …</code>),
+            a trip's itinerary steps, a user's bookings (joined to trip title and dates),
+            or a trip's booked/capacity counts.
+          </p>
+          <p>
+            The admin home filters Active / Closed in Dart by comparing
+            <code>start_datetime</code> and <code>end_datetime</code> to now — not by
+            <code>trip_status_lkp</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage live" id="s-compose">
+        <div class="stage-n">04</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Compose a trip</h3>
+            <span class="chip live">API only</span>
+          </div>
+          <p>
+            Location first (<code>locations_lkp</code>, lat/long + JSONB metadata).
+            Then <code>/add_trips</code> with org, creator, price, capacity, base location,
+            window, <code>status_id</code> defaulting to 1 (draft in seed order), and
+            optional JSONB metadata. <code>RETURNING id</code> comes back as <code>trip_id</code>.
+          </p>
+          <p>
+            Itinerary is not a JSON blob on the trip. It is ordered rows
+            (<code>UNIQUE (trip_id, step_order)</code>). <code>/add_trip_itinerary</code>
+            takes <code>all_trips[]</code> and inserts one by one. If a later step fails,
+            it <code>DELETE FROM trip_itineraries WHERE trip_id = …</code> — all steps for
+            that trip, not a SQL transaction around the batch.
+          </p>
+          <p>
+            Update trip / update one itinerary step / delete trip (CASCADE through
+            itineraries, media, bookings) complete the write surface. The Flutter
+            admin home does not call any of these yet.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage live" id="s-book">
+        <div class="stage-n">05</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Book a seat</h3>
+            <span class="chip live">API only</span>
+          </div>
+          <p>
+            <code>/add_booking</code> is the fact insert. It refuses a second pending or
+            confirmed row for the same <code>(trip_id, user_id)</code>, refuses a trip
+            that has already started, refuses a full capacity (pending + confirmed count
+            against <code>trips.capacity</code>), and refuses <code>price_paid</code> below
+            <code>trips.price</code>. A published-status check is in the file and commented out.
+          </p>
+          <p>
+            On success: <code>secrets.token_urlsafe(32)</code> becomes <code>qr_token</code>,
+            expiry is start + 1 day, <code>status_id</code> is the lookup for
+            <code>pending</code>. The unique constraint <code>uq_trip_user_booking</code>
+            is the last line of defence. The handler returns the token in JSON; the
+            follow-up <code>RETURNING</code> fetch is commented out, so the client does
+            not receive the serial <code>bookings.id</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage schema" id="s-attend">
+        <div class="stage-n">06</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Attend (QR + device)</h3>
+            <span class="chip schema">schema only</span>
+          </div>
+          <p>
+            <code>devices</code> stores a fingerprint <em>hash</em>, never a raw MAC —
+            the schema comments say so, and warn that mobile OSes will not give you a MAC
+            anyway. <code>checkins</code> records staff scan, scanner device, student
+            device hash, optional coordinates, and the QR token used.
+          </p>
+          <p>
+            <code>trip_media</code> is the same kind of unused arm: table exists, no
+            blueprint writes it. Seed SQL demonstrates a full check-in; Docker's
+            <code>new_seed.sql</code> only loads lookups.
+          </p>
+          <div class="gate">
+            <span class="label">Not in /api/v1</span>
+            No check-in, device-register, or media endpoint is registered.
+            The ticket QR is generated at booking time and waiting for a scanner.
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 05 snowflake -->
+  <section>
+    <div class="sec-head">
+      <span class="num">05</span>
+      <h2>The snowflake</h2>
+    </div>
+    <div class="col">
+      <p>
+        This is an OLTP database drawn as a snowflake, not a warehouse star.
+        The fact is <code>bookings</code>: one row per student on a trip.
+        Dimensions are normalized outward into lookup tables (<code>*_lkp</code>)
+        and role-specific profile tables, so a name or a status code lives once.
+      </p>
+      <p>
+        That is the point of the split. A star would copy <code>role</code>,
+        <code>university</code>, <code>city</code>, and itinerary steps onto every
+        booking. Here a booking points at a user and a trip; the user points at a
+        role and a profile; the trip points at a location, a status, and an ordered
+        list of steps that themselves point at locations again.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 620" role="img" aria-label="Snowflake: bookings at the centre, dimensions normalized outward">
+        <!-- fact -->
+        <rect x="390" y="268" width="300" height="84" rx="8" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2.2"/>
+        <text x="540" y="300" text-anchor="middle" class="l" fill="var(--pine)">bookings  ·  fact</text>
+        <text x="540" y="322" text-anchor="middle" class="s" fill="var(--ink-2)">grain: (trip_id, user_id) unique</text>
+        <text x="540" y="338" text-anchor="middle" class="s" fill="var(--ink-2)">price_paid · qr_token · status_id</text>
+
+        <!-- users dim -->
+        <rect x="40" y="250" width="210" height="72" rx="7" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="145" y="278" text-anchor="middle" class="l" fill="var(--ink)">users</text>
+        <text x="145" y="298" text-anchor="middle" class="s" fill="var(--ink-2)">email unique · role_id · org</text>
+        <line x1="250" y1="286" x2="386" y2="300" stroke="var(--ink-3)" stroke-width="1.4"/>
+
+        <!-- trips dim -->
+        <rect x="830" y="250" width="210" height="72" rx="7" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="935" y="278" text-anchor="middle" class="l" fill="var(--ink)">trips</text>
+        <text x="935" y="298" text-anchor="middle" class="s" fill="var(--ink-2)">org · location · status · price</text>
+        <line x1="830" y1="286" x2="694" y2="300" stroke="var(--ink-3)" stroke-width="1.4"/>
+
+        <!-- booking status -->
+        <rect x="430" y="400" width="220" height="52" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="540" y="422" text-anchor="middle" class="l" fill="var(--amber)">booking_status_lkp</text>
+        <text x="540" y="440" text-anchor="middle" class="s" fill="var(--ink-2)">pending · confirmed · cancelled</text>
+        <line x1="540" y1="352" x2="540" y2="400" stroke="var(--ink-3)" stroke-width="1.3"/>
+
+        <!-- checkins / devices -->
+        <rect x="250" y="488" width="200" height="56" rx="6" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="350" y="512" text-anchor="middle" class="l" fill="var(--ink-2)">checkins</text>
+        <text x="350" y="530" text-anchor="middle" class="s" fill="var(--ink-3)">schema only</text>
+        <line x1="430" y1="340" x2="350" y2="488" stroke="var(--ink-3)" stroke-width="1.2" stroke-dasharray="4 3"/>
+
+        <rect x="630" y="488" width="200" height="56" rx="6" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="730" y="512" text-anchor="middle" class="l" fill="var(--ink-2)">devices</text>
+        <text x="730" y="530" text-anchor="middle" class="s" fill="var(--ink-3)">fingerprint hash</text>
+        <line x1="145" y1="322" x2="630" y2="500" stroke="var(--ink-3)" stroke-width="1.2" stroke-dasharray="4 3"/>
+
+        <!-- user snowflake arms -->
+        <rect x="16" y="36" width="168" height="50" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="100" y="58" text-anchor="middle" class="l" fill="var(--amber)">user_roles_lkp</text>
+        <text x="100" y="74" text-anchor="middle" class="s" fill="var(--ink-2)">admin · staff · customer</text>
+        <line x1="100" y1="86" x2="130" y2="250" stroke="var(--ink-3)" stroke-width="1.2"/>
+
+        <rect x="200" y="16" width="168" height="70" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="284" y="38" text-anchor="middle" class="l" fill="var(--ink)">admin_profiles</text>
+        <text x="284" y="56" text-anchor="middle" class="s" fill="var(--ink-2)">is_superadmin</text>
+        <text x="284" y="72" text-anchor="middle" class="s" fill="var(--ink-3)">1–1 users</text>
+        <line x1="250" y1="86" x2="160" y2="250" stroke="var(--ink-3)" stroke-width="1.2"/>
+
+        <rect x="384" y="16" width="168" height="70" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="468" y="38" text-anchor="middle" class="l" fill="var(--ink)">staff_profiles</text>
+        <text x="468" y="56" text-anchor="middle" class="s" fill="var(--ink-2)">title · Pending</text>
+        <text x="468" y="72" text-anchor="middle" class="s" fill="var(--ink-3)">+ organization_id</text>
+        <line x1="430" y1="86" x2="180" y2="250" stroke="var(--ink-3)" stroke-width="1.2"/>
+
+        <rect x="568" y="16" width="188" height="70" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="662" y="38" text-anchor="middle" class="l" fill="var(--ink)">customer_profiles</text>
+        <text x="662" y="56" text-anchor="middle" class="s" fill="var(--ink-2)">student_number</text>
+        <text x="662" y="72" text-anchor="middle" class="s" fill="var(--ink-3)">is_exchange · uni</text>
+        <line x1="620" y1="86" x2="200" y2="250" stroke="var(--ink-3)" stroke-width="1.2"/>
+
+        <rect x="772" y="16" width="188" height="70" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="866" y="38" text-anchor="middle" class="l" fill="var(--amber)">universities_lkp</text>
+        <text x="866" y="56" text-anchor="middle" class="s" fill="var(--ink-2)">domain unique</text>
+        <text x="866" y="72" text-anchor="middle" class="s" fill="var(--ink-3)">abo.fi · utu.fi · …</text>
+        <line x1="820" y1="86" x2="700" y2="50" stroke="var(--ink-3)" stroke-width="1.2"/>
+        <line x1="866" y1="86" x2="662" y2="86" stroke="var(--ink-3)" stroke-width="1.2"/>
+
+        <rect x="976" y="36" width="88" height="50" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="1020" y="58" text-anchor="middle" class="l" fill="var(--amber)">type</text>
+        <text x="1020" y="74" text-anchor="middle" class="s" fill="var(--ink-2)">lkp</text>
+        <text x="980" y="108" class="s" fill="var(--ink-3)">seed only</text>
+
+        <!-- org -->
+        <rect x="40" y="150" width="210" height="56" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="145" y="174" text-anchor="middle" class="l" fill="var(--ink)">organizations</text>
+        <text x="145" y="192" text-anchor="middle" class="s" fill="var(--ink-2)">slug · social_media JSONB</text>
+        <line x1="145" y1="206" x2="145" y2="250" stroke="var(--ink-3)" stroke-width="1.2"/>
+        <line x1="250" y1="178" x2="830" y2="270" stroke="var(--ink-3)" stroke-width="1.2"/>
+
+        <!-- trip snowflake arms -->
+        <rect x="830" y="140" width="210" height="52" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="935" y="162" text-anchor="middle" class="l" fill="var(--amber)">trip_status_lkp</text>
+        <text x="935" y="178" text-anchor="middle" class="s" fill="var(--ink-2)">draft · published · archived</text>
+        <line x1="935" y1="192" x2="935" y2="250" stroke="var(--ink-3)" stroke-width="1.2"/>
+
+        <rect x="830" y="360" width="210" height="56" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="935" y="384" text-anchor="middle" class="l" fill="var(--ink)">trip_itineraries</text>
+        <text x="935" y="402" text-anchor="middle" class="s" fill="var(--ink-2)">step_order unique per trip</text>
+        <line x1="935" y1="322" x2="935" y2="360" stroke="var(--ink-3)" stroke-width="1.2"/>
+
+        <rect x="830" y="436" width="210" height="44" rx="6" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="935" y="464" text-anchor="middle" class="l" fill="var(--ink-3)">trip_media  ·  unused</text>
+        <line x1="935" y1="416" x2="935" y2="436" stroke="var(--ink-3)" stroke-width="1.2" stroke-dasharray="4 3"/>
+
+        <rect x="830" y="540" width="210" height="52" rx="6" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="935" y="562" text-anchor="middle" class="l" fill="var(--amber)">locations_lkp</text>
+        <text x="935" y="578" text-anchor="middle" class="s" fill="var(--ink-2)">shared by trip + step</text>
+        <line x1="935" y1="322" x2="990" y2="540" stroke="var(--ink-3)" stroke-width="1.2"/>
+        <line x1="935" y1="416" x2="900" y2="540" stroke="var(--ink-3)" stroke-width="1.2"/>
+
+        <!-- auth satellites -->
+        <rect x="40" y="360" width="210" height="52" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="145" y="382" text-anchor="middle" class="l" fill="var(--pine)">user_sessions</text>
+        <text x="145" y="398" text-anchor="middle" class="s" fill="var(--ink-2)">token_hash · 24 h</text>
+        <line x1="145" y1="322" x2="145" y2="360" stroke="var(--pine)" stroke-width="1.3"/>
+
+        <rect x="40" y="432" width="210" height="52" rx="6" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="145" y="454" text-anchor="middle" class="l" fill="var(--pine)">user_otps</text>
+        <text x="145" y="470" text-anchor="middle" class="s" fill="var(--ink-2)">email · 15 min · 3 tries</text>
+
+        <text x="40" y="610" class="s" fill="var(--ink-3)">Amber = lookup dimension. Solid = used by an API. Dashed = table exists, no blueprint. customer_type_lkp is seeded; customer_profiles in setup.sql has no customer_type_id — seed.sql disagrees.</text>
+      </svg>
+      <figcaption>
+        <strong>Why itinerary is a table.</strong>
+        The schema comment is the decision: ordered steps are easier to reorder than a
+        JSON blob. <code>locations_lkp</code> is the shared geography dimension — a trip's
+        base and a step's meeting point are the same kind of thing.
+      </figcaption>
+    </figure>
+
+    <div class="col">
+      <h3>Lookup codes, as seeded</h3>
+    </div>
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr><th>Table</th><th>Codes</th><th>Who uses it</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>user_roles_lkp</code></td>
+            <td>admin, staff, customer</td>
+            <td>Every sign-up looks up by name. Flutter assumes ids 1 / 2 / 3 in that order.</td>
+          </tr>
+          <tr>
+            <td><code>trip_status_lkp</code></td>
+            <td>draft, published, archived</td>
+            <td><code>/add_trips</code> defaults <code>status_id</code> to 1. Booking's published check is commented out.</td>
+          </tr>
+          <tr>
+            <td><code>booking_status_lkp</code></td>
+            <td>pending, confirmed, cancelled</td>
+            <td>New bookings insert pending. Capacity counts pending + confirmed.</td>
+          </tr>
+          <tr>
+            <td><code>customer_type_lkp</code></td>
+            <td>domestic, exchange</td>
+            <td>Seeded. <code>customer_profiles</code> in <code>setup.sql</code> uses <code>is_exchange</code> instead of this FK.</td>
+          </tr>
+          <tr>
+            <td><code>universities_lkp</code></td>
+            <td>~50 Finnish institutions, unique <code>domain</code></td>
+            <td>Student email construction and <code>get_universities</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note warn" style="margin-top:22px">
+      <p class="hd">Two seed files, two truths</p>
+      <p>
+        Docker init runs <code>new_seed.sql</code> — lookups only.
+        <code>seed.sql</code> also builds a demo org, three users, a published trip,
+        a booking, a device, and a check-in. It inserts
+        <code>customer_profiles.customer_type_id</code>, a column
+        <code>setup.sql</code> does not create. The live shape of a fresh compose
+        is lookups plus empty core tables.
+      </p>
+    </div>
+  </section>
+
+  <!-- 06 API table -->
+  <section>
+    <div class="sec-head">
+      <span class="num">06</span>
+      <h2>The /api/v1 surface</h2>
+    </div>
+    <div class="col">
+      <p>
+        Prefix on every blueprint: <code>/api/v1</code>. Swagger UI is Flasgger at
+        <code>/apidocs</code>. None of these routes are wrapped in
+        <code>@require_auth</code>.
+      </p>
+    </div>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr><th>Method</th><th>Path</th><th>SQL / store</th><th>Called from Flutter</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/sign_in</code></td>
+            <td><code>signInUser</code> + <code>insertSession</code></td>
+            <td>SignInPage</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/generateOTP</code></td>
+            <td><code>insertOTP</code> + SMTP</td>
+            <td>UserSignUpPage</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/checkOTP</code></td>
+            <td><code>verifyOTP</code> / invalidate / attempts</td>
+            <td>UserSignUpPage</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/studentSignUp</code></td>
+            <td><code>signUpUser</code> + <code>insertIntoCustomer</code></td>
+            <td>UserSignUpPage</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/staff_sign_up</code></td>
+            <td><code>signUpUser</code> + <code>insertIntoStaffProfiles</code></td>
+            <td>StaffSignUpPage</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/organization_signup</code></td>
+            <td>org + user + <code>insertIntoAdminProfiles</code></td>
+            <td>AdminSignUpPage</td>
+          </tr>
+          <tr>
+            <td class="num">GET</td>
+            <td><code>/get_universities</code></td>
+            <td><code>getUniversities</code></td>
+            <td>UserSignUpPage</td>
+          </tr>
+          <tr>
+            <td class="num">GET</td>
+            <td><code>/get_organizations</code></td>
+            <td><code>getOrganizations</code></td>
+            <td>StaffSignUpPage</td>
+          </tr>
+          <tr>
+            <td class="num">GET</td>
+            <td><code>/get_roles</code></td>
+            <td><code>getAllRoles</code></td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/get_trips</code></td>
+            <td><code>getTrips</code></td>
+            <td>AdminHomePage (sends Bearer)</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/get_trips_itinerary</code></td>
+            <td><code>getTripItinerary</code></td>
+            <td>TripDetailsPage</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/add_location</code></td>
+            <td><code>insertLocation</code></td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/add_trips</code></td>
+            <td><code>insertTrips</code> RETURNING id</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="num">PUT</td>
+            <td><code>/update_trip</code></td>
+            <td><code>updateTrips</code></td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="num">DELETE</td>
+            <td><code>/delete_trip</code></td>
+            <td>inline <code>DELETE … %s</code></td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/add_trip_itinerary</code></td>
+            <td><code>insertTripItinerary</code> (+ wipe on fail)</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="num">PUT</td>
+            <td><code>/update_trip_itinerary</code></td>
+            <td><code>updateTripItinerary</code></td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/add_booking</code></td>
+            <td>check existing + availability + <code>insertBooking</code></td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/get_bookings</code></td>
+            <td><code>getUserBookings</code></td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/get_trip_bookings</code></td>
+            <td>capacity vs count</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/get_students</code></td>
+            <td>users ⋈ universities_lkp</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/get_user_data</code></td>
+            <td>inline SELECT including <code>password_hash</code></td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td class="num">POST</td>
+            <td><code>/update_user_data</code></td>
+            <td>inline UPDATE; password optionally SHA-256</td>
+            <td>—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 07 decisions -->
+  <section>
+    <div class="sec-head">
+      <span class="num">07</span>
+      <h2>Decisions that are visible in the code</h2>
+    </div>
+
+    <div class="grid-3" style="margin-top:4px">
+      <div class="tier allow">
+        <h3>Snowflake, not a blob</h3>
+        <ul>
+          <li>Lookups for role, status, location, university.</li>
+          <li>Profiles off <code>users</code> so the core table stays slim.</li>
+          <li>Itinerary as ordered rows with a uniqueness constraint.</li>
+          <li>JSONB only where the shape is genuinely freeform (<code>metadata</code>, <code>extra</code>, <code>social_media</code>).</li>
+        </ul>
+      </div>
+      <div class="tier allow">
+        <h3>SQL files as the contract</h3>
+        <ul>
+          <li>One named file per operation.</li>
+          <li>Python does not assemble joins.</li>
+          <li>Flasgger docstrings on the handler are what the client was written against.</li>
+        </ul>
+      </div>
+      <div class="tier allow">
+        <h3>Ticket is a server token</h3>
+        <ul>
+          <li>QR payload is generated at insert, not by the phone.</li>
+          <li>Hash the session JWT at rest; store device fingerprints hashed.</li>
+          <li>Check-in designed around staff scan + student device hash.</li>
+        </ul>
+      </div>
+      <div class="tier ask">
+        <h3>Manual serials</h3>
+        <ul>
+          <li>Sign-up computes <code>max(id)+1</code> even though columns are <code>SERIAL</code>.</li>
+          <li>Two concurrent sign-ups can collide. Trips avoid this with <code>RETURNING id</code>.</li>
+        </ul>
+      </div>
+      <div class="tier ask">
+        <h3>University as organization</h3>
+        <ul>
+          <li>Students put <code>university_id</code> into <code>users.organization_id</code>.</li>
+          <li><code>get_students</code> joins that column to <code>universities_lkp</code>, not <code>organizations</code>.</li>
+        </ul>
+      </div>
+      <div class="tier deny">
+        <h3>Still open</h3>
+        <ul>
+          <li>Decorators written, not mounted.</li>
+          <li>Passwords not hashed on create/sign-in.</li>
+          <li><code>/generateOTP</code> echoes the code in JSON.</li>
+          <li>A second, unused JWT decorator expects payload <code>sub</code>; the live issuer writes <code>user_id</code>.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 layout -->
+  <section>
+    <div class="sec-head">
+      <span class="num">08</span>
+      <h2>What lives where</h2>
+    </div>
+    <div class="filemap">
+      <div class="frow">
+        <div class="path">app/app.py</div>
+        <div class="what"><b>Process entry.</b> <code>load_dotenv</code>, register blueprints, Flasgger, <code>app.run(host=0.0.0.0, port=8080)</code>.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/apis/</div>
+        <div class="what"><b>One file per route</b> plus <code>__init__.py</code> which is the only registry. <code>decorator.py</code> and <code>SkeyGenerate.py</code> are not imported.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/queries/allQueries/</div>
+        <div class="what"><b>The SQL.</b> Named to match <code>getQuery.get_query("…")</code>. Loaded from <code>cwd/app/queries/allQueries</code>.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/postgresConnector/</div>
+        <div class="what"><b>psycopg2 wrapper.</b> Env-driven connect. Commit on success, rollback on error. No pool.</div>
+      </div>
+      <div class="frow">
+        <div class="path">app/utils/</div>
+        <div class="what"><b>JWT, OTP, auth decorators, :param replace.</b> SMTP settings live in <code>otpHandler.py</code> (not documented here).</div>
+      </div>
+      <div class="frow">
+        <div class="path">database/setup.sql</div>
+        <div class="what"><b>Snowflake DDL.</b> Lookups, core, trips, bookings, devices, checkins, <code>updated_at</code> triggers. Init script 01.</div>
+      </div>
+      <div class="frow">
+        <div class="path">database/otp_table.sql</div>
+        <div class="what"><b>user_otps</b> plus <code>cleanup_expired_otps()</code>. Init 02.</div>
+      </div>
+      <div class="frow">
+        <div class="path">database/user_sessions_table.sql</div>
+        <div class="what"><b>user_sessions</b> plus revoke / cleanup functions. Init 03.</div>
+      </div>
+      <div class="frow">
+        <div class="path">database/new_seed.sql</div>
+        <div class="what"><b>Lookups only</b> — what Docker actually loads (init 04).</div>
+      </div>
+      <div class="frow">
+        <div class="path">database/docker-compose.yml</div>
+        <div class="what"><b>postgres:12</b> published at host 5433. Volume for data + the four init SQL files.</div>
+      </div>
+      <div class="frow">
+        <div class="path">backend/docker-compose.yml</div>
+        <div class="what"><b>python:3.10</b> image, bind-mount <code>../app</code>, pip from <code>requirements.txt</code>, listen 8080.</div>
+      </div>
+      <div class="frow">
+        <div class="path">requirements.txt</div>
+        <div class="what">Flask, psycopg2 / psycopg2-binary, flasgger, PyJWT, dotenv. Python 3.11.8 in the README; the backend image is 3.10.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 09 role -->
+  <section>
+    <div class="sec-head">
+      <span class="num">09</span>
+      <h2>What this author built</h2>
+    </div>
+    <div class="col">
+      <p>
+        The snowflake and the API are the work in this folder: DDL, lookup seed,
+        Flask blueprints, SQL files, JWT/OTP/session machinery, Docker wiring,
+        and the booking invariants (capacity, uniqueness, start time, price).
+      </p>
+      <p>
+        The Flutter client is a sibling project. It implements welcome, three
+        sign-up funnels, sign-in, an admin trip list, and itinerary detail.
+        It does not yet call booking or trip-authoring endpoints, and staff/customer
+        home is a placeholder.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <p style="margin:0 0 .6rem">
+      Drawn from <code>app/</code>, <code>database/setup.sql</code> and companions,
+      and the Flutter sources under <code>trip_top_frontend_new/trip_top/lib</code>.
+      No values from <code>.env</code>. <code>.venv</code> ignored.
+    </p>
+    <p class="mono" style="font-size:.76rem;margin:0">
+      trip_top · /api/v1 · PostgreSQL 12 · Flask · Flutter
+    </p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById("theme-toggle");
+  var key = "trip-top-theme";
+  try {
+    var stored = localStorage.getItem(key);
+    if (stored === "dark" || stored === "light") root.setAttribute("data-theme", stored);
+  } catch (e) {}
+  function label() {
+    var now = root.getAttribute("data-theme");
+    if (now === "dark") btn.textContent = "Light";
+    else if (now === "light") btn.textContent = "Dark";
+    else btn.textContent = "Theme";
+  }
+  label();
+  btn.addEventListener("click", function () {
+    var now = root.getAttribute("data-theme");
+    var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var next;
+    if (now === "dark") next = "light";
+    else if (now === "light") next = "dark";
+    else next = prefersDark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem(key, next); } catch (e) {}
+    label();
+  });
+})();
+</script>
+</body>
+</html>

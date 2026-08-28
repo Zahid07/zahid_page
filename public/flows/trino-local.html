@@ -1,0 +1,1388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinoTesting — how catalogs are wired</title>
+<meta name="description" content="Local Trino on Docker with Hive, Iceberg, Delta Lake, MinIO, ClickHouse and PostgreSQL connectors. Catalogs, storage, and the query path.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+  :root {
+    --paper:      #F1F3F2;
+    --surface:    #FAFBFA;
+    --surface-2:  #E7EBE9;
+    --ink:        #16201F;
+    --ink-2:      #3E4C4A;
+    --ink-3:      #6B7A77;
+    --rule:       #CFD8D5;
+    --rule-soft:  #DFE5E3;
+
+    --pine:       #0F6E63;
+    --pine-soft:  #DCEBE8;
+    --amber:      #9A5B00;
+    --amber-soft: #F5E8D2;
+    --oxide:      #9E2B18;
+    --oxide-soft: #F6DED9;
+    --slate:      #2C4A6E;
+    --slate-soft: #E2E8F0;
+
+    --shadow: 0 1px 2px rgba(22,32,31,.06), 0 8px 24px -12px rgba(22,32,31,.18);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0E1413;
+      --surface:    #151D1C;
+      --surface-2:  #1E2827;
+      --ink:        #E4EAE8;
+      --ink-2:      #B0BEBB;
+      --ink-3:      #7F8F8C;
+      --rule:       #2C3937;
+      --rule-soft:  #222D2C;
+
+      --pine:       #5FC4B4;
+      --pine-soft:  #12312D;
+      --amber:      #D99A4E;
+      --amber-soft: #33240F;
+      --oxide:      #E08575;
+      --oxide-soft: #381914;
+      --slate:      #8BB4E0;
+      --slate-soft: #1A2838;
+
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #0E1413;
+    --surface:    #151D1C;
+    --surface-2:  #1E2827;
+    --ink:        #E4EAE8;
+    --ink-2:      #B0BEBB;
+    --ink-3:      #7F8F8C;
+    --rule:       #2C3937;
+    --rule-soft:  #222D2C;
+
+    --pine:       #5FC4B4;
+    --pine-soft:  #12312D;
+    --amber:      #D99A4E;
+    --amber-soft: #33240F;
+    --oxide:      #E08575;
+    --oxide-soft: #381914;
+    --slate:      #8BB4E0;
+    --slate-soft: #1A2838;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 24px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  .col  { max-width: 68ch; }
+
+  h1, h2, h3, .label, .stage-n, th, .mono { font-family: "Archivo", "Helvetica Neue", Arial, sans-serif; }
+
+  h1 {
+    font-size: clamp(2.1rem, 5vw, 3.1rem);
+    font-weight: 700;
+    letter-spacing: -.025em;
+    line-height: 1.05;
+    text-wrap: balance;
+    margin: 0 0 .5rem;
+  }
+  h2 {
+    font-size: clamp(1.35rem, 2.4vw, 1.7rem);
+    font-weight: 600;
+    letter-spacing: -.015em;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h3 {
+    font-size: 1.02rem;
+    font-weight: 600;
+    letter-spacing: -.005em;
+    margin: 0 0 .4rem;
+  }
+  p { margin: 0 0 1.05rem; }
+  a { color: var(--pine); text-underline-offset: 3px; }
+  strong { font-weight: 600; }
+  em { font-style: italic; color: var(--ink-2); }
+
+  .label {
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .lede {
+    font-size: 1.16rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 60ch;
+  }
+
+  code, .mono, pre { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+  code {
+    font-size: .85em;
+    background: var(--surface-2);
+    padding: .12em .38em;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 6px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: .82rem;
+    line-height: 1.6;
+    margin: 0;
+    color: var(--ink-2);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  pre .c { color: var(--ink-3); }
+  pre .h { color: var(--pine); font-weight: 600; }
+
+  header.masthead {
+    padding: 72px 0 40px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .kicker {
+    display: flex; gap: 14px; align-items: baseline;
+    margin-bottom: 22px; flex-wrap: wrap;
+  }
+  .kicker .sep { color: var(--rule); }
+
+  .theme-toggle {
+    position: absolute;
+    top: 72px;
+    right: 0;
+    font-family: "Archivo", sans-serif;
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: .45em .75em;
+    cursor: pointer;
+  }
+  .theme-toggle:hover { border-color: var(--pine); color: var(--pine); }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--rule-soft); }
+  section:last-of-type { border-bottom: none; }
+  .sec-head { display: flex; gap: 18px; align-items: baseline; margin-bottom: 28px; }
+  .sec-head .num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; font-weight: 700;
+    color: var(--pine);
+    padding-top: .35em;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+
+  .pipeline { display: flex; flex-direction: column; gap: 0; margin-top: 8px; }
+  .stage {
+    display: grid;
+    grid-template-columns: 58px 1fr;
+    gap: 22px;
+    position: relative;
+    padding: 22px 0;
+  }
+  .stage:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: 28px; top: 56px; bottom: -6px;
+    width: 2px;
+    background: linear-gradient(var(--rule), var(--rule-soft));
+  }
+  .stage-n {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--surface);
+    border: 2px solid var(--rule);
+    font-size: .82rem; font-weight: 700;
+    color: var(--ink-2);
+    position: relative; z-index: 1;
+  }
+  .stage.lake .stage-n { border-color: var(--pine); color: var(--pine); }
+  .stage.jdbc .stage-n { border-color: var(--amber); color: var(--amber); }
+  .stage.engine .stage-n { border-color: var(--slate); color: var(--slate); }
+
+  .stage-body { padding-top: 4px; min-width: 0; }
+  .stage-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  .stage-body p { margin-bottom: .7rem; max-width: 62ch; }
+
+  .chip {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .64rem; font-weight: 500;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: .25em .6em; border-radius: 3px;
+    white-space: nowrap;
+  }
+  .chip.lake    { background: var(--pine-soft); color: var(--pine); }
+  .chip.jdbc    { background: var(--amber-soft); color: var(--amber); }
+  .chip.engine  { background: var(--slate-soft); color: var(--slate); }
+  .chip.warn    { background: var(--oxide-soft); color: var(--oxide); }
+
+  .gate {
+    border-left: 3px solid var(--oxide);
+    background: var(--oxide-soft);
+    padding: 10px 14px;
+    border-radius: 0 4px 4px 0;
+    font-size: .9rem;
+    color: var(--ink);
+    max-width: 62ch;
+  }
+  .gate .label { color: var(--oxide); display: block; margin-bottom: 2px; }
+
+  .t-wrap { overflow-x: auto; border: 1px solid var(--rule-soft); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th {
+    text-align: left;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { color: var(--ink); }
+  td.num { font-family: "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+
+  .filemap {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .frow {
+    display: grid;
+    grid-template-columns: minmax(220px, 280px) 1fr;
+    gap: 20px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--rule-soft);
+    align-items: baseline;
+  }
+  .frow:last-child { border-bottom: none; }
+  .frow .path {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .8rem;
+    color: var(--pine);
+    word-break: break-word;
+  }
+  .frow .what { font-size: .93rem; color: var(--ink-2); }
+  .frow .what b { color: var(--ink); font-weight: 600; }
+
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--pine);
+    border-radius: 0 6px 6px 0;
+    padding: 16px 20px;
+    max-width: 66ch;
+  }
+  .note.warn { border-left-color: var(--amber); }
+  .note.stop { border-left-color: var(--oxide); }
+  .note p:last-child { margin-bottom: 0; }
+  .note h3 { margin-bottom: 8px; }
+
+  .tier {
+    border: 1px solid var(--rule);
+    border-top-width: 3px;
+    border-radius: 6px;
+    padding: 16px 18px;
+    background: var(--surface);
+  }
+  .tier.allow { border-top-color: var(--pine); }
+  .tier.ask   { border-top-color: var(--amber); }
+  .tier.deny  { border-top-color: var(--oxide); }
+  .tier h3 { margin-bottom: 8px; }
+  .tier ul { margin: 0; padding-left: 1.1em; font-size: .88rem; color: var(--ink-2); }
+  .tier li { margin-bottom: 5px; }
+  .tier li code { font-size: .78em; }
+
+  .decisions { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .decision { background: var(--surface); padding: 1.3rem clamp(16px, 2.4vw, 26px); }
+  .decision h4 { font-family: "Archivo", sans-serif; font-size: 1.02rem; font-weight: 600; margin: 0 0 .35rem; }
+  .decision .verdict {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .72rem; color: var(--ink-3);
+    letter-spacing: .06em; text-transform: uppercase;
+    margin-bottom: .5rem;
+  }
+  .decision p { font-size: .92rem; color: var(--ink-2); margin-bottom: .55rem; }
+  .decision p:last-child { margin-bottom: 0; }
+
+  figure {
+    margin: 1.9rem 0 1rem;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 1.5rem 1.3rem 1.1rem;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  figcaption {
+    font-family: "Archivo", sans-serif;
+    font-size: .75rem;
+    color: var(--ink-3);
+    margin-top: 1rem;
+    padding-top: .85rem;
+    border-top: 1px solid var(--rule);
+    line-height: 1.5;
+  }
+  figcaption b { color: var(--ink); font-weight: 600; }
+  svg { display: block; max-width: 100%; height: auto; }
+  .l { font-family: "Archivo", sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .m { font-family: "JetBrains Mono", monospace; font-size: 11px; }
+  .s { font-family: "JetBrains Mono", monospace; font-size: 10px; }
+
+  footer {
+    padding-top: 40px;
+    color: var(--ink-3);
+    font-size: .88rem;
+    border-top: 1px solid var(--rule-soft);
+    margin-top: 20px;
+  }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; padding: 0 18px 64px; }
+    .stage { grid-template-columns: 40px 1fr; gap: 16px; }
+    .stage-n { width: 40px; height: 40px; font-size: .72rem; }
+    .stage:not(:last-child)::after { left: 19px; top: 42px; }
+    .frow { grid-template-columns: 1fr; gap: 4px; }
+    .sec-head { gap: 12px; }
+    .theme-toggle { position: static; margin-bottom: 1rem; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: opacity .15s ease; }
+    a:hover { opacity: .75; }
+  }
+  :focus-visible { outline: 2px solid var(--pine); outline-offset: 2px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle colour theme">Theme: system</button>
+    <div class="kicker">
+      <span class="label">TinoTesting</span>
+      <span class="sep">/</span>
+      <span class="label">Trino 455 · Docker · six catalogs</span>
+    </div>
+    <h1>How catalogs are wired,<br>and where a query goes</h1>
+    <p class="lede">
+      A single-node Trino coordinator on Docker, pointed at a Hive Metastore, MinIO,
+      PostgreSQL and ClickHouse. Catalogs are property files. The query path is
+      catalog name → connector SPI → metadata plane → storage plane.
+    </p>
+  </header>
+
+  <!-- 01 shape -->
+  <section>
+    <div class="sec-head">
+      <span class="num">01</span>
+      <h2>The shape of the system</h2>
+    </div>
+    <div class="col">
+      <p>
+        README is one line: set up Trino on Docker with multiple connectors.
+        The running topology is <code>docker-compose.yml</code>. Six files under
+        <code>catalog/</code> become six Trino catalogs. Two other property files sit
+        at the repo root and are <em>not</em> mounted.
+      </p>
+      <p>
+        Three facts about this shape drive everything that follows:
+      </p>
+    </div>
+    <div class="grid-2" style="margin-top:22px">
+      <div class="note">
+        <h3>Catalogs are files, not a registry</h3>
+        <p style="font-size:.93rem;color:var(--ink-2)">
+          Compose mounts <code>./catalog</code> to <code>/etc/trino/catalog</code>.
+          Filename minus <code>.properties</code> is the catalog name a SQL client
+          uses. Changing a connector means editing a file and restarting Trino.
+        </p>
+      </div>
+      <div class="note">
+        <h3>Two storage planes, one engine</h3>
+        <p style="font-size:.93rem;color:var(--ink-2)">
+          Lakehouse catalogs (Hive, Iceberg, Delta, the extra Hive catalog named
+          <code>minio</code>) share Hive Metastore + MinIO. JDBC catalogs talk
+          straight to PostgreSQL and ClickHouse. Trino federates; it does not copy.
+        </p>
+      </div>
+      <div class="note">
+        <h3>Coordinator is also the worker</h3>
+        <p style="font-size:.93rem;color:var(--ink-2)">
+          <code>coordinator=true</code> and
+          <code>node-scheduler.include-coordinator=true</code>. There is no
+          separate worker service. Heap is <code>-Xmx1G</code>. Discovery points
+          at <code>http://localhost:8080</code> inside the container.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 02 compose -->
+  <section>
+    <div class="sec-head">
+      <span class="num">02</span>
+      <h2>Compose topology</h2>
+    </div>
+    <div class="col">
+      <p>
+        Six containers on <code>trino-network</code>. Hive Metastore depends on
+        MariaDB. Nothing else declares <code>depends_on</code> — Trino can start
+        before HMS or MinIO is ready.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 420" role="img" aria-label="Docker Compose services: SQL client to Trino to Hive Metastore, MinIO, PostgreSQL and ClickHouse">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="8" y="28" width="150" height="72" rx="7" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="83" y="58" text-anchor="middle" class="l" fill="var(--ink)">SQL client</text>
+        <text x="83" y="78" text-anchor="middle" class="s" fill="var(--ink-3)">JDBC / CLI / UI</text>
+
+        <line x1="158" y1="64" x2="198" y2="64" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="178" y="54" text-anchor="middle" class="s" fill="var(--ink-3)">:8080</text>
+
+        <rect x="200" y="16" width="240" height="96" rx="7" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+        <text x="320" y="6" text-anchor="middle" class="l" fill="var(--pine)">trinodb/trino:455</text>
+        <text x="320" y="48" text-anchor="middle" class="l" fill="var(--pine)">trino</text>
+        <text x="320" y="68" text-anchor="middle" class="s" fill="var(--ink-2)">coordinator + worker</text>
+        <text x="320" y="86" text-anchor="middle" class="s" fill="var(--ink-2)">./etc · ./catalog</text>
+
+        <!-- lakehouse branch -->
+        <line x1="440" y1="50" x2="500" y2="50" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="500" y1="50" x2="500" y2="168" stroke="var(--ink-3)" stroke-width="1.5"/>
+        <line x1="500" y1="168" x2="548" y2="168" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <rect x="550" y="128" width="230" height="80" rx="7" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+        <text x="665" y="154" text-anchor="middle" class="l" fill="var(--pine)">hive-metastore</text>
+        <text x="665" y="174" text-anchor="middle" class="s" fill="var(--ink-2)">Thrift :9083</text>
+        <text x="665" y="190" text-anchor="middle" class="s" fill="var(--ink-2)">bitsondatadev image</text>
+
+        <line x1="780" y1="168" x2="828" y2="168" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <rect x="830" y="128" width="236" height="80" rx="7" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="948" y="154" text-anchor="middle" class="l" fill="var(--ink)">mariadb:10.5.8</text>
+        <text x="948" y="174" text-anchor="middle" class="s" fill="var(--ink-2)">metastore_db :3306</text>
+        <text x="948" y="190" text-anchor="middle" class="s" fill="var(--ink-2)">JDO MySQL driver</text>
+
+        <line x1="320" y1="112" x2="320" y2="248" stroke="var(--ink-3)" stroke-width="1.5"/>
+        <line x1="320" y1="248" x2="548" y2="248" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <rect x="550" y="216" width="230" height="80" rx="7" fill="var(--slate-soft)" stroke="var(--slate)" stroke-width="2"/>
+        <text x="665" y="242" text-anchor="middle" class="l" fill="var(--slate)">minio</text>
+        <text x="665" y="262" text-anchor="middle" class="s" fill="var(--ink-2)">S3 API :9000</text>
+        <text x="665" y="278" text-anchor="middle" class="s" fill="var(--ink-2)">volume minio-data</text>
+
+        <line x1="665" y1="208" x2="665" y2="216" stroke="var(--ink-3)" stroke-width="1.5"/>
+        <text x="790" y="234" class="s" fill="var(--ink-3)">HMS also uses s3a → MinIO</text>
+
+        <!-- JDBC branch -->
+        <line x1="320" y1="112" x2="320" y2="360" stroke="var(--ink-3)" stroke-width="1.5"/>
+        <line x1="320" y1="360" x2="398" y2="360" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <rect x="400" y="320" width="210" height="80" rx="7" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="2"/>
+        <text x="505" y="346" text-anchor="middle" class="l" fill="var(--amber)">postgres</text>
+        <text x="505" y="366" text-anchor="middle" class="s" fill="var(--ink-2)">trino_db :5432</text>
+        <text x="505" y="382" text-anchor="middle" class="s" fill="var(--ink-2)">catalog postgresql</text>
+
+        <line x1="610" y1="360" x2="668" y2="360" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr)"/>
+        <rect x="670" y="320" width="220" height="80" rx="7" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="2"/>
+        <text x="780" y="346" text-anchor="middle" class="l" fill="var(--amber)">clickhouse</text>
+        <text x="780" y="366" text-anchor="middle" class="s" fill="var(--ink-2)">HTTP :8123 · :9009</text>
+        <text x="780" y="382" text-anchor="middle" class="s" fill="var(--ink-2)">native :9000 unused</text>
+      </svg>
+      <figcaption>
+        <b>What talks to what.</b> Trino reaches Hive Metastore on Thrift 9083 and MinIO
+        on HTTP 9000 with path-style S3. HMS itself stores table metadata in MariaDB and
+        is also configured with the same s3a endpoint so location URIs resolve. PostgreSQL
+        and ClickHouse are JDBC-only — they never go through HMS.
+      </figcaption>
+    </figure>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr>
+            <th>Service</th>
+            <th>Image</th>
+            <th>Host ports</th>
+            <th>Role</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">trino</td>
+            <td>trinodb/trino:455</td>
+            <td class="num">8080</td>
+            <td>Coordinator and worker. Mounts <code>./etc</code> → <code>/usr/lib/trino/etc</code> (read-only) and <code>./catalog</code> → <code>/etc/trino/catalog</code>.</td>
+          </tr>
+          <tr>
+            <td class="mono">mariadb</td>
+            <td>mariadb:10.5.8</td>
+            <td class="num">3306</td>
+            <td>Hive Metastore RDBMS. Database <code>metastore_db</code>. Credentials live in compose env and in <code>conf/metastore-site.xml</code> — not repeated here.</td>
+          </tr>
+          <tr>
+            <td class="mono">hive-metastore</td>
+            <td>bitsondatadev/hive-metastore:latest</td>
+            <td class="num">9083</td>
+            <td>Thrift metastore. Config overlay <code>conf/metastore-site.xml</code>. Env <code>METASTORE_DB_HOSTNAME=mariadb</code>.</td>
+          </tr>
+          <tr>
+            <td class="mono">minio</td>
+            <td>minio/minio:RELEASE.2021-01-08T21-18-21Z</td>
+            <td class="num">9000</td>
+            <td>S3-compatible object store. Named volume <code>minio-data</code> at <code>/data</code>. Command <code>server /data</code>. Access key names are in compose; values are lab placeholders.</td>
+          </tr>
+          <tr>
+            <td class="mono">clickhouse</td>
+            <td>yandex/clickhouse-server:latest</td>
+            <td class="num">8123, 9009</td>
+            <td>HTTP interface on 8123 (what the catalog uses). Native 9000 is commented out so it does not collide with MinIO. Healthcheck pings <code>/ping</code>.</td>
+          </tr>
+          <tr>
+            <td class="mono">postgres</td>
+            <td>postgres:latest</td>
+            <td class="num">5432</td>
+            <td>JDBC catalog target. Database <code>trino_db</code>. Separate from the metastore database.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 03 catalogs -->
+  <section>
+    <div class="sec-head">
+      <span class="num">03</span>
+      <h2>Catalogs and connectors</h2>
+    </div>
+    <div class="col">
+      <p>
+        Each file in <code>catalog/</code> is one catalog. The property
+        <code>connector.name</code> selects the plugin. Everything else is connector
+        config. Four catalogs share the same Hive Metastore URI
+        <code>thrift://hive-metastore:9083</code>.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 390" role="img" aria-label="Catalog files mapped to connectors and backends">
+        <defs>
+          <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <text x="8" y="18" class="l" fill="var(--ink-3)">catalog/*.properties</text>
+        <text x="310" y="18" class="l" fill="var(--ink-3)">connector.name</text>
+        <text x="560" y="18" class="l" fill="var(--ink-3)">metadata</text>
+        <text x="820" y="18" class="l" fill="var(--ink-3)">bytes</text>
+
+        <!-- hive -->
+        <rect x="8" y="36" width="250" height="44" rx="5" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="133" y="63" text-anchor="middle" class="m" fill="var(--pine)">hive.properties</text>
+        <line x1="258" y1="58" x2="308" y2="58" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="310" y="36" width="200" height="44" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="410" y="63" text-anchor="middle" class="m" fill="var(--ink)">hive</text>
+
+        <!-- minio (also hive) -->
+        <rect x="8" y="90" width="250" height="44" rx="5" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="133" y="117" text-anchor="middle" class="m" fill="var(--pine)">minio.properties</text>
+        <line x1="258" y1="112" x2="308" y2="112" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="310" y="90" width="200" height="44" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="410" y="117" text-anchor="middle" class="m" fill="var(--ink)">hive</text>
+        <text x="410" y="148" text-anchor="middle" class="s" fill="var(--amber)">same plugin, second catalog</text>
+
+        <!-- iceberg -->
+        <rect x="8" y="162" width="250" height="44" rx="5" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="133" y="189" text-anchor="middle" class="m" fill="var(--pine)">iceberg.properties</text>
+        <line x1="258" y1="184" x2="308" y2="184" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="310" y="162" width="200" height="44" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="410" y="189" text-anchor="middle" class="m" fill="var(--ink)">iceberg</text>
+
+        <!-- delta -->
+        <rect x="8" y="216" width="250" height="44" rx="5" fill="var(--pine-soft)" stroke="var(--pine)"/>
+        <text x="133" y="243" text-anchor="middle" class="m" fill="var(--pine)">delta_lake.properties</text>
+        <line x1="258" y1="238" x2="308" y2="238" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="310" y="216" width="200" height="44" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="410" y="243" text-anchor="middle" class="m" fill="var(--ink)">delta_lake</text>
+
+        <!-- shared HMS + MinIO -->
+        <line x1="510" y1="58" x2="548" y2="58" stroke="var(--ink-3)" stroke-width="1.4"/>
+        <line x1="510" y1="112" x2="548" y2="112" stroke="var(--ink-3)" stroke-width="1.4"/>
+        <line x1="510" y1="184" x2="548" y2="184" stroke="var(--ink-3)" stroke-width="1.4"/>
+        <line x1="510" y1="238" x2="548" y2="238" stroke="var(--ink-3)" stroke-width="1.4"/>
+        <line x1="548" y1="58" x2="548" y2="238" stroke="var(--ink-3)" stroke-width="1.4"/>
+        <line x1="548" y1="148" x2="598" y2="148" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+        <rect x="600" y="108" width="200" height="80" rx="6" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+        <text x="700" y="140" text-anchor="middle" class="l" fill="var(--pine)">Hive Metastore</text>
+        <text x="700" y="160" text-anchor="middle" class="s" fill="var(--ink-2)">thrift :9083</text>
+        <text x="700" y="176" text-anchor="middle" class="s" fill="var(--ink-2)">+ MariaDB</text>
+
+        <line x1="800" y1="132" x2="848" y2="132" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="850" y="96" width="214" height="52" rx="6" fill="var(--slate-soft)" stroke="var(--slate)" stroke-width="2"/>
+        <text x="957" y="128" text-anchor="middle" class="l" fill="var(--slate)">MinIO s3a</text>
+
+        <line x1="510" y1="238" x2="548" y2="280" stroke="var(--ink-3)" stroke-width="1.2" stroke-dasharray="3 3"/>
+        <text x="700" y="292" text-anchor="middle" class="s" fill="var(--oxide)">delta_lake has no hive.s3.* keys</text>
+
+        <!-- jdbc -->
+        <rect x="8" y="290" width="250" height="40" rx="5" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="133" y="315" text-anchor="middle" class="m" fill="var(--amber)">postgresql.properties</text>
+        <line x1="258" y1="310" x2="308" y2="310" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="310" y="290" width="200" height="40" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="410" y="315" text-anchor="middle" class="m" fill="var(--ink)">postgresql</text>
+        <line x1="510" y1="310" x2="598" y2="310" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="600" y="290" width="200" height="40" rx="5" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="700" y="315" text-anchor="middle" class="m" fill="var(--amber)">postgres:5432/trino_db</text>
+
+        <rect x="8" y="340" width="250" height="40" rx="5" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="133" y="365" text-anchor="middle" class="m" fill="var(--amber)">clickhouse.properties</text>
+        <line x1="258" y1="360" x2="308" y2="360" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="310" y="340" width="200" height="40" rx="5" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="410" y="365" text-anchor="middle" class="m" fill="var(--ink)">clickhouse</text>
+        <line x1="510" y1="360" x2="598" y2="360" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="600" y="340" width="200" height="40" rx="5" fill="var(--amber-soft)" stroke="var(--amber)"/>
+        <text x="700" y="365" text-anchor="middle" class="m" fill="var(--amber)">clickhouse:8123/default</text>
+      </svg>
+      <figcaption>
+        <b>Two Hive catalogs on purpose.</b> <code>hive</code> and <code>minio</code> both
+        set <code>connector.name=hive</code> and the same HMS + S3 endpoints. They are
+        two names for the same backend, not two object stores. Delta Lake is the
+        exception: it points at HMS but does not declare S3 client settings.
+      </figcaption>
+    </figure>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr>
+            <th>Catalog</th>
+            <th>Connector</th>
+            <th>Metadata</th>
+            <th>Storage / JDBC</th>
+            <th>Notes from the file</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">hive</td>
+            <td class="mono">hive</td>
+            <td>HMS Thrift 9083</td>
+            <td>MinIO <code>http://minio:9000</code>, path-style</td>
+            <td><code>hive.security=sql-standard</code>. Cache TTL <code>0s</code>, refresh <code>5s</code>, <code>hive.metastore-timeout=10s</code>.</td>
+          </tr>
+          <tr>
+            <td class="mono">minio</td>
+            <td class="mono">hive</td>
+            <td>HMS Thrift 9083</td>
+            <td>Same MinIO endpoint</td>
+            <td>No <code>hive.security</code>. Timeout key is <code>hive.metastore.thrift.client.read-timeout=10s</code> (different property name from <code>hive</code>).</td>
+          </tr>
+          <tr>
+            <td class="mono">iceberg</td>
+            <td class="mono">iceberg</td>
+            <td>HMS Thrift 9083</td>
+            <td>Same MinIO endpoint</td>
+            <td>Cache TTL <code>0s</code>, refresh <code>5s</code>, Thrift read timeout <code>10s</code>. Table format is Iceberg; HMS holds the catalog.</td>
+          </tr>
+          <tr>
+            <td class="mono">delta_lake</td>
+            <td class="mono">delta_lake</td>
+            <td>HMS Thrift 9083</td>
+            <td><em>Not set in this file</em></td>
+            <td>Only two keys: connector name and metastore URI. No <code>hive.s3.*</code>. A table whose location is <code>s3://…</code> has nowhere configured to open that path.</td>
+          </tr>
+          <tr>
+            <td class="mono">postgresql</td>
+            <td class="mono">postgresql</td>
+            <td>Postgres itself</td>
+            <td><code>jdbc:postgresql://postgres:5432/trino_db</code></td>
+            <td>User from <code>connection-user</code>. Password is in the catalog file — treat as a secret; do not commit real ones.</td>
+          </tr>
+          <tr>
+            <td class="mono">clickhouse</td>
+            <td class="mono">clickhouse</td>
+            <td>ClickHouse itself</td>
+            <td><code>jdbc:clickhouse://clickhouse:8123/default</code></td>
+            <td>HTTP interface, not the native protocol. Database name in the URL is <code>default</code>; compose also creates <code>default_db</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note warn" style="margin-top:22px">
+      <h3>Root files that are not catalogs</h3>
+      <p>
+        <code>delta.properties</code> repeats <code>connector.name=delta_lake</code> and
+        the HMS URI — same idea as <code>catalog/delta_lake.properties</code>, but it is
+        not under the mounted catalog directory, so Trino never loads it.
+        <code>storage.properties</code> declares <code>connector.name=storage</code> and
+        MinIO S3 keys. Same problem: it lives at the repo root, not in
+        <code>catalog/</code>, and the storage plugin is not copied into
+        <code>plugin.dir</code>.
+      </p>
+    </div>
+  </section>
+
+  <!-- 04 query path -->
+  <section>
+    <div class="sec-head">
+      <span class="num">04</span>
+      <h2>The query path</h2>
+    </div>
+    <div class="col">
+      <p>
+        Six stages. The fork is at catalog resolution: lakehouse queries go
+        HMS then MinIO; JDBC queries never leave the target database; the
+        in-repo storage plugin, if it were installed, would treat the schema
+        as a file format and the table name as a path.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 250" role="img" aria-label="End-to-end query path from client through Trino to storage">
+        <defs>
+          <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="8" y="70" width="120" height="70" rx="6" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="68" y="100" text-anchor="middle" class="l" fill="var(--ink)">Client</text>
+        <text x="68" y="118" text-anchor="middle" class="s" fill="var(--ink-3)">SQL</text>
+        <line x1="128" y1="105" x2="162" y2="105" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+        <rect x="164" y="58" width="150" height="94" rx="6" fill="var(--slate-soft)" stroke="var(--slate)" stroke-width="2"/>
+        <text x="239" y="86" text-anchor="middle" class="l" fill="var(--slate)">HTTP :8080</text>
+        <text x="239" y="106" text-anchor="middle" class="s" fill="var(--ink-2)">parse · analyze</text>
+        <text x="239" y="122" text-anchor="middle" class="s" fill="var(--ink-2)">plan · schedule</text>
+        <text x="239" y="140" text-anchor="middle" class="s" fill="var(--slate)">include-coordinator</text>
+        <line x1="314" y1="105" x2="348" y2="105" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr3)"/>
+
+        <rect x="350" y="58" width="150" height="94" rx="6" fill="var(--surface)" stroke="var(--ink)" stroke-width="2"/>
+        <text x="425" y="86" text-anchor="middle" class="l" fill="var(--ink)">Catalog</text>
+        <text x="425" y="106" text-anchor="middle" class="s" fill="var(--ink-2)">hive · iceberg</text>
+        <text x="425" y="122" text-anchor="middle" class="s" fill="var(--ink-2)">delta · minio</text>
+        <text x="425" y="140" text-anchor="middle" class="s" fill="var(--ink-2)">pg · clickhouse</text>
+
+        <line x1="500" y1="78" x2="548" y2="50" stroke="var(--pine)" stroke-width="1.6" marker-end="url(#arr3)"/>
+        <line x1="500" y1="105" x2="548" y2="105" stroke="var(--amber)" stroke-width="1.6" marker-end="url(#arr3)"/>
+        <line x1="500" y1="132" x2="548" y2="168" stroke="var(--ink-3)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arr3)"/>
+
+        <rect x="550" y="16" width="230" height="68" rx="6" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+        <text x="665" y="42" text-anchor="middle" class="l" fill="var(--pine)">HMS → splits → S3</text>
+        <text x="665" y="62" text-anchor="middle" class="s" fill="var(--ink-2)">MinIO GET object</text>
+
+        <rect x="550" y="96" width="230" height="52" rx="6" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="2"/>
+        <text x="665" y="128" text-anchor="middle" class="l" fill="var(--amber)">JDBC execute</text>
+
+        <rect x="550" y="160" width="230" height="52" rx="6" fill="var(--surface-2)" stroke="var(--rule)" stroke-dasharray="4 3"/>
+        <text x="665" y="192" text-anchor="middle" class="l" fill="var(--ink-3)">storage plugin</text>
+
+        <line x1="780" y1="50" x2="828" y2="105" stroke="var(--pine)" stroke-width="1.5" marker-end="url(#arr3)"/>
+        <line x1="780" y1="122" x2="828" y2="122" stroke="var(--amber)" stroke-width="1.5" marker-end="url(#arr3)"/>
+        <line x1="780" y1="186" x2="828" y2="140" stroke="var(--ink-3)" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#arr3)"/>
+
+        <rect x="830" y="70" width="234" height="90" rx="6" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+        <text x="947" y="106" text-anchor="middle" class="l" fill="var(--pine)">Pages → client</text>
+        <text x="947" y="128" text-anchor="middle" class="s" fill="var(--ink-2)">assembled on coordinator</text>
+        <text x="947" y="144" text-anchor="middle" class="s" fill="var(--ink-2)">heap 1G · G1GC</text>
+      </svg>
+      <figcaption>
+        <b>Federation, not a pipeline.</b> There is no ingest job in this repo. Data is
+        assumed to already live in MinIO, Postgres or ClickHouse. Trino only plans,
+        splits, and reads. The dashed storage path exists as Java under
+        <code>storage/</code> and as <code>storage.properties</code> — it is not on the
+        compose-mounted catalog path.
+      </figcaption>
+    </figure>
+
+    <div class="pipeline">
+
+      <div class="stage engine">
+        <div class="stage-n">01</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Client hits Trino</h3>
+            <span class="chip engine">engine</span>
+          </div>
+          <p>
+            HTTP on <code>8080</code>, published to the host. Config sets
+            <code>http-server.process-forwarded=true</code> so a reverse proxy that
+            terminates TLS (the comment names Katacoda) is treated as secure.
+            There is no password authenticator in <code>etc/</code> — the node is
+            open on the Docker network.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage engine">
+        <div class="stage-n">02</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Analyze against a catalog</h3>
+            <span class="chip engine">engine</span>
+          </div>
+          <p>
+            Qualified names are <code>catalog.schema.table</code>. Trino loads
+            every <code>*.properties</code> from <code>/etc/trino/catalog</code>
+            at startup. Node identity is <code>node.environment=docker</code>,
+            data dir <code>/data/trino</code>, plugins
+            <code>/usr/lib/trino/plugin</code>. Logging is
+            <code>io.trino=DEBUG</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage lake">
+        <div class="stage-n">03</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Lakehouse: metadata from HMS</h3>
+            <span class="chip lake">hive · iceberg · delta · minio</span>
+          </div>
+          <p>
+            Connector asks Hive Metastore over Thrift for databases, tables,
+            partitions, and locations. HMS reads its own store from MariaDB
+            (<code>jdbc:mysql://mariadb:3306/metastore_db</code> in
+            <code>metastore-site.xml</code>). Cache TTL is zero on Hive and
+            Iceberg so listings are not stale — at the cost of a Thrift round
+            trip on every metadata call.
+          </p>
+          <p>
+            Iceberg still uses HMS as the catalog implementation here
+            (<code>hive.metastore.uri</code>), not a REST or JDBC Iceberg catalog.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage lake">
+        <div class="stage-n">04</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Lakehouse: bytes from MinIO</h3>
+            <span class="chip lake">s3 path-style</span>
+          </div>
+          <p>
+            Hive and Iceberg catalogs set <code>hive.s3.endpoint=http://minio:9000</code>
+            and <code>hive.s3.path-style-access=true</code>. Path-style is required:
+            MinIO does not serve virtual-hosted bucket URLs the way AWS S3 does.
+            HMS is given the same endpoint via Hadoop <code>fs.s3a.*</code> so
+            location URIs it stores can be opened.
+          </p>
+          <div class="gate">
+            <span class="label">Gap — Delta Lake</span>
+            <code>catalog/delta_lake.properties</code> never sets those S3 keys.
+            Metadata can resolve; object reads against MinIO are not configured
+            in that catalog.
+          </div>
+        </div>
+      </div>
+
+      <div class="stage jdbc">
+        <div class="stage-n">05</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>JDBC: pushdown to the database</h3>
+            <span class="chip jdbc">postgresql · clickhouse</span>
+          </div>
+          <p>
+            PostgreSQL uses the standard Trino PostgreSQL connector and a JDBC
+            URL on the Docker hostname <code>postgres</code>. ClickHouse uses
+            the HTTP port 8123. Compose publishes ClickHouse 9009 (interserver)
+            and comments out native 9000 so MinIO can own that port on the host.
+          </p>
+          <p>
+            These catalogs do not share HMS. Cross-catalog SQL
+            (<code>SELECT … FROM hive.x JOIN postgresql.y</code>) is planned
+            in Trino and executed as two scans plus a join on the coordinator.
+          </p>
+        </div>
+      </div>
+
+      <div class="stage engine">
+        <div class="stage-n">06</div>
+        <div class="stage-body">
+          <div class="stage-title">
+            <h3>Pages on the coordinator</h3>
+            <span class="chip engine">1G heap</span>
+          </div>
+          <p>
+            Because the coordinator is in the worker pool, splits run in the
+            same JVM that answered HTTP. JVM flags: G1, 32M regions, 256M
+            reserved code cache, exit on OOM, dump heap on OOM. That is enough
+            for lab queries; it is not a production worker profile.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 05 storage plugin -->
+  <section>
+    <div class="sec-head">
+      <span class="num">05</span>
+      <h2>The storage plugin in the tree</h2>
+    </div>
+    <div class="col">
+      <p>
+        Under <code>storage/</code> is the <code>org.ebyhr.trino.storage</code>
+        connector (Trino Storage). It is source, not a running catalog.
+        <code>StoragePlugin</code> registers one factory named
+        <code>storage</code> — matching <code>storage.properties</code>.
+        Compose never copies this into <code>/usr/lib/trino/plugin</code>.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 1080 300" role="img" aria-label="Storage connector: schema is file type, table name is path, plugins decode the stream">
+        <defs>
+          <marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="8" y="80" width="200" height="100" rx="7" fill="var(--surface-2)" stroke="var(--rule)"/>
+        <text x="108" y="114" text-anchor="middle" class="l" fill="var(--ink)">SQL</text>
+        <text x="108" y="134" text-anchor="middle" class="s" fill="var(--ink-2)">schema = format</text>
+        <text x="108" y="152" text-anchor="middle" class="s" fill="var(--ink-2)">table = path</text>
+        <line x1="208" y1="130" x2="248" y2="130" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr4)"/>
+
+        <rect x="250" y="40" width="220" height="180" rx="7" fill="var(--slate-soft)" stroke="var(--slate)" stroke-width="2"/>
+        <text x="360" y="30" text-anchor="middle" class="l" fill="var(--slate)">StorageConnector</text>
+        <text x="360" y="72" text-anchor="middle" class="s" fill="var(--ink-2)">Metadata</text>
+        <text x="360" y="92" text-anchor="middle" class="s" fill="var(--ink-2)">SplitManager (1 split)</text>
+        <text x="360" y="112" text-anchor="middle" class="s" fill="var(--ink-2)">PageSourceProvider</text>
+        <text x="360" y="132" text-anchor="middle" class="s" fill="var(--ink-2)">RecordSetProvider</text>
+        <text x="360" y="158" text-anchor="middle" class="s" fill="var(--slate)">PTF list / read_file</text>
+        <text x="360" y="178" text-anchor="middle" class="s" fill="var(--ink-2)">HiveS3 + HDFS + GCS + Azure</text>
+        <text x="360" y="198" text-anchor="middle" class="s" fill="var(--ink-2)">allow-local-files default true</text>
+
+        <line x1="470" y1="130" x2="510" y2="130" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr4)"/>
+
+        <rect x="512" y="70" width="200" height="120" rx="7" fill="var(--pine-soft)" stroke="var(--pine)" stroke-width="2"/>
+        <text x="612" y="104" text-anchor="middle" class="l" fill="var(--pine)">StorageClient</text>
+        <text x="612" y="126" text-anchor="middle" class="s" fill="var(--ink-2)">http(s) → HttpClient</text>
+        <text x="612" y="144" text-anchor="middle" class="s" fill="var(--ink-2)">s3 / s3a / hdfs → FS</text>
+        <text x="612" y="162" text-anchor="middle" class="s" fill="var(--ink-2)">else local file:</text>
+
+        <line x1="712" y1="130" x2="752" y2="130" stroke="var(--ink-3)" stroke-width="1.5" marker-end="url(#arr4)"/>
+
+        <rect x="754" y="40" width="310" height="220" rx="7" fill="var(--surface)" stroke="var(--rule)"/>
+        <text x="909" y="68" text-anchor="middle" class="l" fill="var(--ink)">PluginFactory</text>
+        <text x="909" y="94" text-anchor="middle" class="m" fill="var(--ink-2)">csv  CsvPlugin ','</text>
+        <text x="909" y="112" text-anchor="middle" class="m" fill="var(--ink-2)">tsv  CsvPlugin tab</text>
+        <text x="909" y="130" text-anchor="middle" class="m" fill="var(--ink-2)">ssv  CsvPlugin ';'</text>
+        <text x="909" y="148" text-anchor="middle" class="m" fill="var(--ink-2)">txt  one varchar column</text>
+        <text x="909" y="166" text-anchor="middle" class="m" fill="var(--ink-2)">raw  whole file as data</text>
+        <text x="909" y="184" text-anchor="middle" class="m" fill="var(--ink-2)">excel  Apache POI</text>
+        <text x="909" y="202" text-anchor="middle" class="m" fill="var(--ink-2)">orc   Trino OrcReader</text>
+        <text x="909" y="220" text-anchor="middle" class="m" fill="var(--ink-2)">json  Jackson</text>
+        <text x="909" y="242" text-anchor="middle" class="s" fill="var(--ink-3)">FileType enum = schema names</text>
+      </svg>
+      <figcaption>
+        <b>Schema is the decoder, table is the path.</b>
+        <code>FileType</code> exposes schemas <code>csv</code>, <code>ssv</code>,
+        <code>tsv</code>, <code>txt</code>, <code>raw</code>, <code>excel</code>,
+        <code>orc</code>, <code>json</code>. Listing tables returns an empty set —
+        you query a path, you do not browse a warehouse. Table functions
+        <code>system.list(PATH)</code> and <code>system.read_file(TYPE, PATH)</code>
+        are the intended API. Splits: one <code>FixedSplitSource</code> per query.
+      </figcaption>
+    </figure>
+
+    <div class="col">
+      <p>
+        Path routing in <code>StorageClient.getInputStream</code>:
+        <code>http://</code> / <code>https://</code> go through Airlift
+        <code>HttpClient</code>; <code>hdfs://</code>, <code>s3a://</code>,
+        <code>s3://</code> go through <code>HdfsFileSystemFactory</code>
+        (S3 module wired in the factory); anything else is a local file and
+        is denied if <code>allow-local-files</code> is false. Listing over HTTP
+        is rejected.
+      </p>
+    </div>
+    <pre><code><span class="c">-- intended shape, once the plugin is on plugin.dir and</span>
+<span class="c">-- storage.properties is copied into catalog/</span>
+<span class="h">SELECT</span> * <span class="h">FROM</span> TABLE(storage.system.read_file(
+    TYPE => 'csv',
+    PATH => 's3a://bucket/path/file.csv'
+));
+
+<span class="h">SELECT</span> * <span class="h">FROM</span> TABLE(storage.system.list(
+    PATH => 's3a://bucket/prefix/'
+));</code></pre>
+  </section>
+
+  <!-- 06 trino node -->
+  <section>
+    <div class="sec-head">
+      <span class="num">06</span>
+      <h2>Node, JVM, metastore XML</h2>
+    </div>
+    <div class="col">
+      <p>
+        <code>etc/</code> is what the Trino container sees as its etc tree.
+        <code>conf/metastore-site.xml</code> is what the Hive Metastore container
+        sees. They agree on hostnames on the compose network.
+      </p>
+    </div>
+
+    <div class="grid-3" style="margin-top:8px">
+      <div class="tier allow">
+        <h3>etc/config.properties</h3>
+        <ul>
+          <li><code>coordinator=true</code></li>
+          <li><code>node-scheduler.include-coordinator=true</code></li>
+          <li><code>http-server.http.port=8080</code></li>
+          <li><code>discovery-server.enabled=true</code></li>
+          <li><code>discovery.uri=http://localhost:8080</code></li>
+          <li><code>http-server.process-forwarded=true</code></li>
+        </ul>
+      </div>
+      <div class="tier ask">
+        <h3>etc/node + jvm + log</h3>
+        <ul>
+          <li><code>node.environment=docker</code></li>
+          <li><code>node.data-dir=/data/trino</code></li>
+          <li><code>plugin.dir=/usr/lib/trino/plugin</code></li>
+          <li><code>-Xmx1G</code>, G1, 32M regions</li>
+          <li><code>ReservedCodeCacheSize=256M</code></li>
+          <li><code>io.trino=DEBUG</code></li>
+        </ul>
+      </div>
+      <div class="tier deny">
+        <h3>conf/metastore-site.xml</h3>
+        <ul>
+          <li>Thrift URI <code>hive-metastore:9083</code></li>
+          <li>JDO driver <code>com.mysql.jdbc.Driver</code></li>
+          <li>JDBC URL host <code>mariadb</code>, db <code>metastore_db</code></li>
+          <li><code>fs.s3a.impl</code> = S3AFileSystem</li>
+          <li>s3a endpoint <code>http://minio:9000</code></li>
+          <li>path-style access <code>true</code></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="col" style="margin-top:28px">
+      <p>
+        <code>etc/user.properties</code> is a duplicate of
+        <code>etc/node.properties</code> (same three keys). It is not a user
+        mapping file. Trino will ignore it unless the process is told to read
+        that name.
+      </p>
+    </div>
+  </section>
+
+  <!-- 07 compose_no -->
+  <section>
+    <div class="sec-head">
+      <span class="num">07</span>
+      <h2>The other compose file</h2>
+    </div>
+    <div class="col">
+      <p>
+        <code>docker-compose_no.yml</code> is Compose file format 3.9 and is
+        not the default. It is a second topology, and it disagrees with
+        <code>metastore-site.xml</code>.
+      </p>
+    </div>
+
+    <div class="t-wrap" style="margin-top:8px">
+      <table>
+        <thead>
+          <tr>
+            <th></th>
+            <th>docker-compose.yml</th>
+            <th>docker-compose_no.yml</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Trino image / port</td>
+            <td>trinodb/trino:455 on host 8080</td>
+            <td>trinodb/trino:latest on host <strong>8086</strong></td>
+          </tr>
+          <tr>
+            <td>Extra Trino mounts</td>
+            <td>etc + catalog only</td>
+            <td>also <code>./config:/etc/trino/config</code> — no <code>config/</code> directory in the repo</td>
+          </tr>
+          <tr>
+            <td>depends_on</td>
+            <td>HMS → MariaDB only</td>
+            <td>Trino → ClickHouse + Postgres; HMS → <code>metastore_db</code></td>
+          </tr>
+          <tr>
+            <td>Metastore RDBMS</td>
+            <td>MariaDB 10.5.8, db <code>metastore_db</code></td>
+            <td>Postgres service <code>metastore_db</code> on host 5433, db <code>metastore</code>. MariaDB service is commented out</td>
+          </tr>
+          <tr>
+            <td>HMS env</td>
+            <td><code>METASTORE_DB_HOSTNAME: mariadb</code></td>
+            <td><code>METASTORE_DB_HOSTNAME: metastore_db</code></td>
+          </tr>
+          <tr>
+            <td>XML still says</td>
+            <td>jdbc:mysql://<strong>mariadb</strong>:3306/metastore_db</td>
+            <td>same XML — still MySQL to <code>mariadb</code>, which this file does not run</td>
+          </tr>
+          <tr>
+            <td>MinIO</td>
+            <td>2021-01-08 image, volume <code>minio-data</code>, port 9000 only, <code>MINIO_ACCESS_KEY</code></td>
+            <td>2024-05-10 image, bind <code>./data</code>, console :9001, <code>MINIO_ROOT_USER</code></td>
+          </tr>
+          <tr>
+            <td>Network name</td>
+            <td><code>trino-network</code></td>
+            <td><code>trino_network</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note stop" style="margin-top:22px">
+      <h3>Do not start _no.yml against this XML</h3>
+      <p>
+        Hive Metastore will still try to open MySQL on hostname
+        <code>mariadb</code>. That hostname is not a service in
+        <code>docker-compose_no.yml</code>. The Postgres metastore on 5433
+        is unused unless the XML driver, URL, and user are changed to match.
+      </p>
+    </div>
+  </section>
+
+  <!-- 08 decisions -->
+  <section>
+    <div class="sec-head">
+      <span class="num">08</span>
+      <h2>Decisions visible in the files</h2>
+    </div>
+    <div class="decisions">
+      <div class="decision">
+        <div class="verdict">Single node, not a cluster</div>
+        <h4>Coordinator schedules work onto itself</h4>
+        <p>
+          One Trino service, <code>include-coordinator=true</code>, 1G heap.
+          Correct for a laptop lab. Wrong if anyone expects isolation between
+          HTTP handling and scans.
+        </p>
+      </div>
+      <div class="decision">
+        <div class="verdict">Shared HMS for three table formats</div>
+        <h4>Hive, Iceberg and Delta all use the same Thrift URI</h4>
+        <p>
+          One MariaDB-backed metastore is the catalog for Hive tables, Iceberg
+          tables and (intended) Delta tables. That is a valid HMS-catalog
+          layout. Namespaces are not isolated — a database created through
+          <code>hive</code> is visible to <code>iceberg</code> as HMS metadata,
+          even if the table format then disagrees.
+        </p>
+      </div>
+      <div class="decision">
+        <div class="verdict">Path-style S3 against MinIO</div>
+        <h4>Virtual-host buckets would miss</h4>
+        <p>
+          Every S3 client in the repo sets path-style access and a path-style
+          endpoint <code>http://minio:9000</code>. Hive catalogs, Iceberg, the
+          unused <code>storage.properties</code>, and HMS <code>fs.s3a.*</code>
+          all agree. That consistency is load-bearing.
+        </p>
+      </div>
+      <div class="decision">
+        <div class="verdict">ClickHouse over HTTP, not native 9000</div>
+        <h4>Port 9000 belongs to MinIO on the host</h4>
+        <p>
+          Compose comments the ClickHouse native port mapping. The catalog JDBC
+          URL uses 8123. That is a host-port decision, not a protocol preference
+          inside the Docker network — containers could still talk 9000 to each
+          other if the catalog said so. It does not.
+        </p>
+      </div>
+      <div class="decision">
+        <div class="verdict">Two Hive catalogs, one backend</div>
+        <h4><code>hive</code> vs <code>minio</code></h4>
+        <p>
+          Same connector, same HMS, same S3 endpoint. Difference: SQL-standard
+          authorization on <code>hive</code>, and a different metastore timeout
+          property name. Useful as an alias; misleading if read as “the MinIO
+          catalog is a different store.”
+        </p>
+      </div>
+      <div class="decision">
+        <div class="verdict">Metastore cache disabled</div>
+        <h4>TTL 0s, refresh 5s</h4>
+        <p>
+          Hive and Iceberg catalogs do not cache HMS listings. Fine for a lab
+          where another process is writing tables. Extra Thrift load if the
+          catalog is large.
+        </p>
+      </div>
+      <div class="decision">
+        <div class="verdict">Plugin source without a mount</div>
+        <h4>trino-storage is documentation-by-source</h4>
+        <p>
+          To actually query files as tables you would build the plugin, drop it
+          in <code>plugin.dir</code>, and move <code>storage.properties</code>
+          into <code>catalog/</code>. None of that is in compose.
+        </p>
+      </div>
+      <div class="decision">
+        <div class="verdict">Open HTTP, lab credentials in files</div>
+        <h4>No authenticator, secrets in compose and catalogs</h4>
+        <p>
+          This is a local lab. Catalog JDBC passwords and MinIO keys are
+          committed as placeholders. Do not reuse those values, and do not
+          publish the host ports past localhost without adding auth.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 09 file map -->
+  <section>
+    <div class="sec-head">
+      <span class="num">09</span>
+      <h2>What each path is for</h2>
+    </div>
+    <div class="filemap">
+      <div class="frow">
+        <div class="path">docker-compose.yml</div>
+        <div class="what"><b>The topology that matches the XML.</b> Trino 455, MariaDB HMS, MinIO, Postgres, ClickHouse.</div>
+      </div>
+      <div class="frow">
+        <div class="path">docker-compose_no.yml</div>
+        <div class="what"><b>Alternate topology.</b> Latest Trino on 8086, Postgres as intended HMS DB — currently inconsistent with <code>metastore-site.xml</code>.</div>
+      </div>
+      <div class="frow">
+        <div class="path">catalog/*.properties</div>
+        <div class="what"><b>Live catalogs.</b> Mounted to <code>/etc/trino/catalog</code>. Six connectors as named above.</div>
+      </div>
+      <div class="frow">
+        <div class="path">etc/</div>
+        <div class="what"><b>Trino node config.</b> Mounted to <code>/usr/lib/trino/etc</code>. Coordinator, JVM, logging, node id. Official images often also read <code>/etc/trino</code> — this mount is the one compose declares.</div>
+      </div>
+      <div class="frow">
+        <div class="path">conf/metastore-site.xml</div>
+        <div class="what"><b>Hive Metastore overlay.</b> Thrift, MySQL JDO, s3a to MinIO. Shared by both compose files.</div>
+      </div>
+      <div class="frow">
+        <div class="path">delta.properties</div>
+        <div class="what"><b>Not loaded.</b> Root-level duplicate of the Delta catalog idea.</div>
+      </div>
+      <div class="frow">
+        <div class="path">storage.properties</div>
+        <div class="what"><b>Not loaded.</b> Would enable <code>connector.name=storage</code> against MinIO if the plugin were installed and this file lived in <code>catalog/</code>.</div>
+      </div>
+      <div class="frow">
+        <div class="path">storage/</div>
+        <div class="what"><b>ebyhr Trino Storage SPI.</b> Factory, metadata, splits, page/record sources, file-type plugins, <code>list</code> / <code>read_file</code> table functions.</div>
+      </div>
+      <div class="frow">
+        <div class="path">README.md</div>
+        <div class="what"><b>Intent only.</b> “Setup Trino on docker and setup multiple connectors with it.”</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p style="margin:0 0 .6rem">
+      Drawn from <code>docker-compose.yml</code>, <code>docker-compose_no.yml</code>,
+      <code>catalog/</code>, <code>etc/</code>, <code>conf/metastore-site.xml</code>,
+      <code>storage/</code>, and the two root property files. Object-store blob
+      contents were not read. Catalog and compose credential <em>values</em> are
+      omitted on purpose; only property names and hostnames appear here.
+    </p>
+    <p class="mono" style="margin:0;font-size:.76rem">
+      TinoTesting · Trino 455 · Hive Metastore · MinIO · PostgreSQL · ClickHouse
+    </p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById('theme-toggle');
+  var stored = null;
+  try { stored = localStorage.getItem('tino-theme'); } catch (e) {}
+
+  function label(mode) {
+    if (mode === 'dark') return 'Theme: dark';
+    if (mode === 'light') return 'Theme: light';
+    return 'Theme: system';
+  }
+
+  function apply(mode) {
+    if (mode === 'dark' || mode === 'light') {
+      root.setAttribute('data-theme', mode);
+    } else {
+      root.removeAttribute('data-theme');
+      mode = 'system';
+    }
+    if (btn) btn.textContent = label(mode);
+  }
+
+  apply(stored === 'dark' || stored === 'light' ? stored : 'system');
+
+  if (btn) {
+    btn.addEventListener('click', function () {
+      var cur = root.getAttribute('data-theme');
+      var next = cur === 'dark' ? 'light' : cur === 'light' ? 'system' : 'dark';
+      apply(next);
+      try {
+        if (next === 'system') localStorage.removeItem('tino-theme');
+        else localStorage.setItem('tino-theme', next);
+      } catch (e) {}
+    });
+  }
+})();
+</script>
+</body>
+</html>
