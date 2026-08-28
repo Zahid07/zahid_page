@@ -15,9 +15,9 @@ export const experience = [
   {
     role: "Senior Data Engineer",
     company: "Salla",
-    dates: "Sep 2025 — Present",
+    dates: "Sep 2025 — Sep 2026",
     place: "Remote, Finland",
-    did: "I own the production analytics path: ERP, transactions, and Kafka events into ClickHouse on EKS — and I keep the consumers from falling behind when traffic spikes.",
+    did: "I owned the production analytics path: ERP, transactions, and Kafka events into ClickHouse on EKS — and I kept the consumers from falling behind when traffic spiked.",
     points: [
       "Run end-to-end ELT from ERP, transactional, and event sources into ClickHouse for near-real-time analytics, on AWS EKS with Terraform-managed infra.",
       "Designed Kafka microservices (Python/JavaScript) with Redis, Docker, and KEDA scaling on consumer lag — then unblocked a consumer bottleneck from 25 to 25,000 msg/s.",
