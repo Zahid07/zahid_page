@@ -1,6 +1,6 @@
 export const site = {
   name: "Muhammad Zahid",
-  title: "Senior Data Engineer",
+  title: "Data Engineer",
   location: "Turku, Finland",
   email: "zahidmuhammad127@gmail.com",
   phone: "+358 44 959 9940",
@@ -13,7 +13,7 @@ export const site = {
 
 export const experience = [
   {
-    role: "Senior Data Engineer",
+    role: "Data Engineer",
     company: "Salla",
     dates: "Sep 2025 — Sep 2026",
     place: "Remote, Finland",
