@@ -42,6 +42,7 @@ export const experience = [
       "Built ELT pipelines on Azure Databricks for a global consumer-health client, with incremental loads into ADLS Gen2 and Unity Catalog catalogs and schemas.",
       "Implemented a data mesh: domain-owned data products on a shared self-serve platform under federated governance.",
       "Built a generic ETL framework that cut deployment time by 60% and processing from 10 hours to 5, covering MySQL, SQL Server, APIs, scraping, and PDFs.",
+      "Built a real-time Spark Structured Streaming pipeline for a teacher attendance dashboard, joining the live stream with warehouse data.",
       "Implemented Kafka + PySpark streaming and dimensional models (facts/dims, SCD Type 2/4) with geographic normalization across sources.",
       "Put an NLP name-normalization model in the production path so Korean names parsed cleanly for entity matching.",
       "Led ClickHouse adoption as the OLAP engine (about 40% query gain) and automated RBAC plus anonymization, cutting that manual work by ~90%.",
@@ -75,7 +76,7 @@ export const experience = [
 // Mirrors the skills in D:cv_makermaster_cv.yaml (the source of truth). Keep them in sync.
 export const skills = {
   Languages: ["Python", "SQL", "TypeScript", "JavaScript", "Bash", "C/C++", "Rust (working)"],
-  "Streaming & Orchestration": ["Kafka", "RabbitMQ", "Timeplus", "Spark", "PySpark", "Airflow", "Mage AI", "dbt"],
+  "Streaming & Orchestration": ["Kafka", "RabbitMQ", "Timeplus", "Spark", "Spark Structured Streaming", "PySpark", "Airflow", "Mage AI", "dbt"],
   "Databases & Warehousing": ["ClickHouse", "PostgreSQL", "Redshift", "DuckDB", "Trino", "Delta Lake", "Iceberg", "MySQL", "Oracle", "Redis"],
   Cloud: ["AWS (S3, Glue, Lambda, SQS, EKS)", "GCP (Cloud Run, Cloud Tasks, Cloud SQL, Vertex AI)", "Azure (Databricks, Unity Catalog, Data Factory, ADLS Gen2)"],
   "Infrastructure & CI/CD": ["Kubernetes", "Docker", "Helm", "KEDA", "Terraform (working)", "GitHub Actions", "GitLab CI/CD", "pytest"],
