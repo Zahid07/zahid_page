@@ -45,31 +45,12 @@ export const tones: Record<
   Tone,
   { fill: string; stroke: string; text: string }
 > = {
-  source: {
-    fill: "rgba(251, 191, 36, 0.14)",
-    stroke: "rgba(252, 211, 77, 0.55)",
-    text: "#fde68a",
-  },
-  process: {
-    fill: "rgba(56, 189, 248, 0.14)",
-    stroke: "rgba(125, 211, 252, 0.55)",
-    text: "#7dd3fc",
-  },
-  store: {
-    fill: "rgba(34, 211, 238, 0.12)",
-    stroke: "rgba(103, 232, 249, 0.5)",
-    text: "#67e8f9",
-  },
-  serve: {
-    fill: "rgba(167, 139, 250, 0.14)",
-    stroke: "rgba(196, 181, 253, 0.55)",
-    text: "#c4b5fd",
-  },
-  gate: {
-    fill: "rgba(255,255,255,0.08)",
-    stroke: "rgba(255,255,255,0.38)",
-    text: "#f4f4f5",
-  },
+  // Light theme: soft tints, mid-tone strokes, dark readable kickers.
+  source: { fill: "rgba(251, 191, 36, 0.14)", stroke: "rgba(217, 119, 6, 0.55)", text: "#92400e" },
+  process: { fill: "rgba(56, 189, 248, 0.12)", stroke: "rgba(2, 132, 199, 0.5)", text: "#075985" },
+  store: { fill: "rgba(34, 211, 238, 0.12)", stroke: "rgba(8, 145, 178, 0.5)", text: "#155e75" },
+  serve: { fill: "rgba(167, 139, 250, 0.14)", stroke: "rgba(124, 58, 237, 0.45)", text: "#5b21b6" },
+  gate: { fill: "rgba(23, 23, 23, 0.04)", stroke: "rgba(23, 23, 23, 0.35)", text: "#262626" },
 };
 
 function b(

@@ -2,22 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Design tokens: the Plainjoin concept's dark theme (neutral oklch greys + one orange accent). */
+/* Design tokens: the Plainjoin concept's light theme (neutral oklch greys + one orange accent). */
 :root {
-  --bg: oklch(0.145 0 0);
-  --bg-soft: oklch(0.175 0 0);
-  --card: oklch(0.185 0 0 / 0.82);
-  --fg: oklch(0.985 0 0);
-  --muted: oklch(0.708 0 0);
-  --muted-2: oklch(0.556 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --border-strong: oklch(1 0 0 / 18%);
+  --bg: oklch(0.99 0 0);
+  --bg-soft: oklch(0.975 0 0);
+  --card: oklch(1 0 0 / 0.88);
+  --fg: oklch(0.145 0 0);
+  --muted: oklch(0.556 0 0);
+  --muted-2: oklch(0.708 0 0);
+  --border: oklch(0.922 0 0);
+  --border-strong: oklch(0.87 0 0);
   --accent: oklch(0.646 0.222 41.116);
-  --accent-soft: oklch(0.646 0.222 41.116 / 0.18);
-  --good: oklch(0.7 0.13 155);
-  --shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 12px 40px -12px oklch(0 0 0 / 0.6);
-  --shadow-lg: 0 2px 4px oklch(0 0 0 / 0.3), 0 40px 100px -30px oklch(0 0 0 / 0.85);
-  color-scheme: dark;
+  --accent-soft: oklch(0.646 0.222 41.116 / 0.12);
+  --good: oklch(0.6 0.13 155);
+  --shadow: 0 1px 2px oklch(0 0 0 / 0.04), 0 12px 40px -12px oklch(0 0 0 / 0.12);
+  --shadow-lg: 0 2px 4px oklch(0 0 0 / 0.04), 0 40px 100px -30px oklch(0 0 0 / 0.28);
+  color-scheme: light;
 }
 
 * {
@@ -167,11 +167,11 @@ body {
 }
 
 .prose-glass p {
-  @apply mb-4 text-[15.5px] leading-7 text-white/75 last:mb-0;
+  @apply mb-4 text-[15.5px] leading-7 text-ink/75 last:mb-0;
 }
 
 .prose-glass li {
-  @apply text-[15.5px] leading-7 text-white/75;
+  @apply text-[15.5px] leading-7 text-ink/75;
 }
 
 .prose-glass ul {
@@ -179,18 +179,49 @@ body {
 }
 
 .prose-glass strong {
-  @apply font-semibold text-white/90;
+  @apply font-semibold text-ink/90;
 }
 
 .prose-glass code {
-  @apply rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[13px] text-white;
+  @apply rounded-md border border-ink/10 bg-ink/5 px-1.5 py-0.5 font-mono text-[13px] text-ink;
 }
 
 .prose-glass a {
-  @apply text-white underline decoration-white/25 underline-offset-4 hover:decoration-white;
+  @apply text-ink underline decoration-ink/25 underline-offset-4 hover:decoration-ink;
+}
+
+/* Hero: rotating tech orbit and the line-by-line lineage trace. */
+@keyframes orbit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.orbit-ring {
+  animation: orbit-spin linear infinite;
+}
+@keyframes trace-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.trace-row {
+  opacity: 0;
+  animation: trace-in 420ms ease forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .orbit-ring {
+    animation: none;
+  }
+  .trace-row {
+    opacity: 1;
+    animation: none;
+  }
   html {
     scroll-behavior: auto;
   }

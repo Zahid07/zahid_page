@@ -83,3 +83,53 @@ export const skills = {
   "AI & BI": ["LLM tool calling", "AI agents", "LangGraph", "RAG", "pgvector", "Claude Code", "Power BI", "Superset"],
   "Ways of Working": ["Agile (Scrum)", "Code review", "On-call", "Postmortems"],
 };
+
+// Home-page content (structure borrowed from haroonriasat.com). Every claim traces to master_cv.yaml.
+export const building = ["real-time pipelines", "lakehouses", "AI agents", "data products"];
+
+export const expertise = [
+  {
+    group: "Pipelines & streaming",
+    items: ["Kafka", "Spark Structured Streaming", "PySpark", "Airflow", "Mage AI", "dbt", "RabbitMQ"],
+    practice:
+      "A 1000x Kafka consumer fix and 12 dbt ELT pipelines at Salla; ~200 Airflow DAGs and a Spark Structured Streaming attendance pipeline at Addo AI.",
+  },
+  {
+    group: "Warehouses & lakehouses",
+    items: ["ClickHouse", "PostgreSQL", "Redshift", "Delta Lake", "Iceberg", "Trino", "DuckDB"],
+    practice:
+      "ClickHouse administration with 2-replica HA and a Postgres-to-ClickHouse migration (70% faster dashboards) at Salla; an on-prem bare-metal lakehouse at Addo AI.",
+  },
+  {
+    group: "Cloud & platform",
+    items: ["AWS", "GCP", "Azure", "Kubernetes", "Docker", "Helm", "KEDA", "Terraform (working)"],
+    practice:
+      "Kafka microservices on EKS with KEDA autoscaling at ~98% uptime; Azure Databricks with Unity Catalog; two products I run on GCP Cloud Run.",
+  },
+  {
+    group: "AI & agents",
+    items: ["LLM tool calling", "LangGraph", "RAG", "pgvector", "Vertex AI Gemini", "Claude Code"],
+    practice:
+      "Multi-agent text-to-SQL with tool calling, a LangGraph modelling agent with human checkpoints, and RAG on pgvector in StudyDeck.",
+  },
+  {
+    group: "Modelling & quality",
+    items: ["Dimensional modelling", "SCD Type 2/4", "Data mesh", "Data contracts", "Schema evolution", "dbt tests"],
+    practice:
+      "Dimensional models across 7+ source systems and a data mesh at Addo AI; forward-compatible schema evolution and data-quality SLAs at Salla.",
+  },
+];
+
+export const learning = [
+  {
+    title: "Model Context Protocol (MCP)",
+    body: "Adding an MCP server to my agentic process-to-data-model pipeline, so agents reach tools through one governed interface.",
+  },
+];
+
+export const hiring = {
+  pitch:
+    "I own data systems end to end, from ingestion to the dashboard, with the tests, monitoring and on-call that keep the numbers honest. I'm happy to start with the boring, high-stakes parts.",
+  fits: ["Data Engineer", "Data Platform Engineer", "Data & AI Engineer", "Graduate and early-career programmes"],
+  where: "Based in Turku, Finland, and eligible to work in the EU. Hybrid in Helsinki or remote.",
+};

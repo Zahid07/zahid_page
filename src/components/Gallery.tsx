@@ -40,7 +40,7 @@ export function Gallery({ shots, captions = [], title }: { shots: string[]; capt
           className="object-cover object-top"
         />
       </button>
-      <p className="mt-3 text-[13px] text-white/50">{caption(active)}</p>
+      <p className="mt-3 text-[13px] text-ink/50">{caption(active)}</p>
 
       {shots.length > 1 ? (
         <div className="mt-4 grid grid-cols-4 gap-3">
@@ -52,7 +52,7 @@ export function Gallery({ shots, captions = [], title }: { shots: string[]; capt
               aria-label={`Show: ${caption(i)}`}
               aria-current={i === active}
               className={`relative aspect-[16/10] overflow-hidden rounded-[10px] border transition ${
-                i === active ? "border-[var(--accent)]" : "border-white/10 opacity-60 hover:opacity-100"
+                i === active ? "border-[var(--accent)]" : "border-ink/10 opacity-60 hover:opacity-100"
               }`}
             >
               <Image src={src} alt="" fill sizes="260px" className="object-cover object-top" />
@@ -75,7 +75,7 @@ export function Gallery({ shots, captions = [], title }: { shots: string[]; capt
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="absolute right-5 top-5 rounded-full border border-white/20 px-3 py-1 font-mono text-xs text-white/80 hover:bg-white/10"
+            className="absolute right-5 top-5 rounded-full border border-white/25 px-3 py-1 font-mono text-xs text-white/85 hover:bg-white/10"
           >
             Close · Esc
           </button>

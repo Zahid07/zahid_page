@@ -1,10 +1,14 @@
 import Link from "next/link";
 import { site } from "@/lib/site";
 
+// Home-page sections (anchors work from any page), plus the full project list.
 const links = [
-  { href: "/", label: "Work" },
-  { href: "/projects", label: "Projects" },
-  { href: "/about", label: "About" },
+  { href: "/#work", label: "Work" },
+  { href: "/#experience", label: "Experience" },
+  { href: "/#expertise", label: "Expertise" },
+  { href: "/#hiring", label: "Hiring?" },
+  { href: "/#contact", label: "Contact" },
+  { href: "/projects", label: "All projects" },
 ];
 
 // Brand mark in the concept's style: two overlapping rings, one filled with the accent.
@@ -20,30 +24,28 @@ function Mark() {
 
 export function Nav() {
   return (
-    <header className="sticky top-0 z-50 border-b border-white/[0.08] bg-[oklch(0.145_0_0/0.72)] backdrop-blur-md">
-      <nav className="mx-auto flex h-14 w-[min(1120px,calc(100%-2rem))] items-center justify-between">
+    <header className="sticky top-0 z-50 border-b border-ink/[0.08] bg-[oklch(1_0_0/0.8)] backdrop-blur-md">
+      <nav className="mx-auto flex h-14 w-[min(1120px,calc(100%-2rem))] items-center justify-between gap-4">
         <Link href="/" className="flex shrink-0 items-center gap-2.5 whitespace-nowrap text-[15px] font-semibold tracking-tight">
           <Mark />
           {site.name}
-          <span className="pill ml-1 hidden md:inline-flex">data · platform · ai</span>
         </Link>
-        <div className="flex items-center gap-0.5 text-[13.5px] text-white/65 sm:gap-1">
+        <div className="hidden items-center gap-0.5 text-[13.5px] text-ink/65 lg:flex">
           {links.map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              className={`rounded-md px-2 py-1.5 transition hover:bg-white/[0.06] hover:text-white sm:px-3 ${
-                l.href === "/" ? "hidden sm:block" : ""
-              }`}
-            >
+            <Link key={l.href} href={l.href} className="rounded-md px-3 py-1.5 transition hover:bg-ink/[0.05] hover:text-ink">
               {l.label}
             </Link>
           ))}
+        </div>
+        <div className="flex items-center gap-1 text-[13.5px] text-ink/65">
+          <Link href="/projects" className="rounded-md px-2 py-1.5 hover:text-ink lg:hidden">
+            Projects
+          </Link>
           <a
             href={site.resume}
-            className="ml-2 rounded-full bg-white px-3.5 py-1.5 text-[13px] font-medium text-black transition hover:bg-white/90"
+            className="ml-1 inline-flex items-center gap-1.5 rounded-full border border-[var(--border-strong)] bg-white px-3.5 py-1.5 text-[13px] font-medium text-ink transition hover:border-ink/30"
           >
-            Resume
+            <span aria-hidden>↓</span> CV
           </a>
         </div>
       </nav>

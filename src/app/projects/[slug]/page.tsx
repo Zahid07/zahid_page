@@ -40,7 +40,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
 
   return (
     <main className="mx-auto w-[min(1120px,calc(100%-2rem))] pb-16 pt-14">
-      <Link href="/projects" className="text-[13px] text-white/45 transition hover:text-white">
+      <Link href="/projects" className="text-[13px] text-ink/45 transition hover:text-ink">
         ← All projects
       </Link>
 
@@ -49,14 +49,14 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
         {project.status ? <StatusPill status={project.status} /> : null}
       </div>
       <h1 className="mt-3 max-w-4xl text-balance text-5xl font-semibold tracking-tight">{project.title}</h1>
-      <p className="mt-5 max-w-3xl text-lg leading-8 text-white/65">{project.summary}</p>
+      <p className="mt-5 max-w-3xl text-lg leading-8 text-ink/65">{project.summary}</p>
 
       <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3 text-[13.5px]">
         {project.context ? (
-          <p className="text-white/50">
+          <p className="text-ink/50">
             {/* Employers read "Built at Salla"; labels like "Personal project" stand on their own. */}
             {/project|venture|thesis|assignment|lab/i.test(project.context) ? null : "Built at "}
-            <span className="text-white/80">{project.context}</span>
+            <span className="text-ink/80">{project.context}</span>
           </p>
         ) : null}
         {project.links?.map((l) => (
@@ -65,7 +65,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
             href={l.href}
             target="_blank"
             rel="noreferrer"
-            className="rounded-full bg-white px-3.5 py-1.5 font-medium text-black transition hover:bg-white/90"
+            className="rounded-full bg-ink px-3.5 py-1.5 font-medium text-white transition hover:bg-ink/85"
           >
             Visit {l.label} ↗
           </a>
@@ -76,7 +76,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
         {project.stack.map((s) => (
           <span
             key={s}
-            className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 font-mono text-[12px] text-white/65"
+            className="rounded-full border border-ink/10 bg-ink/[0.04] px-3 py-1 font-mono text-[12px] text-ink/65"
           >
             {s}
           </span>
@@ -106,7 +106,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
             <span className="eyebrow">Next project</span>
             <span className="mt-1 block text-xl font-semibold tracking-tight">{next.title}</span>
           </span>
-          <span className="text-2xl text-white/40">→</span>
+          <span className="text-2xl text-ink/40">→</span>
         </Link>
       ) : null}
     </main>

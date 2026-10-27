@@ -56,7 +56,7 @@ function BoxShape({
   const t = tones[box.tone ?? "process"];
   const common = {
     fill: t.fill,
-    stroke: active ? "#fff" : t.stroke,
+    stroke: active ? "var(--accent)" : t.stroke,
     strokeWidth: active ? 2.4 : box.group ? 1.8 : 1.4,
     filter: active ? undefined : undefined,
   };
@@ -109,7 +109,7 @@ export function AnimatedDiagram({ spec }: { spec: FlowDiagramSpec }) {
     <GlassCard className="overflow-hidden p-5 md:p-7" hover={false}>
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">
             {spec.kind === "model" ? "The model" : "Live flow"}
           </p>
           <h3 className="mt-1 text-xl font-semibold tracking-tight">{spec.title}</h3>
@@ -120,7 +120,7 @@ export function AnimatedDiagram({ spec }: { spec: FlowDiagramSpec }) {
             setPlay((n) => n + 1);
             setStep(0);
           }}
-          className="rounded-full border border-white/15 bg-white/10 px-3.5 py-1.5 text-[12px] text-white/80 transition hover:border-white/35 hover:bg-white/20"
+          className="rounded-full border border-ink/15 bg-ink/10 px-3.5 py-1.5 text-[12px] text-ink/80 transition hover:border-ink/35 hover:bg-ink/20"
         >
           Replay animation
         </button>
@@ -144,7 +144,7 @@ export function AnimatedDiagram({ spec }: { spec: FlowDiagramSpec }) {
               markerHeight="7"
               orient="auto"
             >
-              <path d="M0 0 L10 5 L0 10 z" fill="rgba(255,255,255,0.45)" />
+              <path d="M0 0 L10 5 L0 10 z" fill="rgba(23,23,23,0.45)" />
             </marker>
             <filter id={`${uid}-glow`} x="-40%" y="-40%" width="180%" height="180%">
               <feGaussianBlur stdDeviation="3.5" result="b" />
@@ -165,7 +165,7 @@ export function AnimatedDiagram({ spec }: { spec: FlowDiagramSpec }) {
                   id={pid}
                   d={d}
                   fill="none"
-                  stroke="rgba(255,255,255,0.28)"
+                  stroke="rgba(23,23,23,0.28)"
                   strokeWidth={1.6}
                   strokeDasharray={edge.dashed ? "6 5" : undefined}
                   markerEnd={`url(#${uid}-arr)`}
@@ -178,7 +178,7 @@ export function AnimatedDiagram({ spec }: { spec: FlowDiagramSpec }) {
                     x={edge.lx ?? 0}
                     y={edge.ly ?? 0}
                     textAnchor="middle"
-                    fill="rgba(255,255,255,0.45)"
+                    fill="rgba(23,23,23,0.5)"
                     fontSize="11"
                     fontWeight="600"
                   >
@@ -186,7 +186,7 @@ export function AnimatedDiagram({ spec }: { spec: FlowDiagramSpec }) {
                   </text>
                 ) : null}
                 {!reduce ? (
-                  <circle r="4.5" fill="#fff" filter={`url(#${uid}-glow)`}>
+                  <circle r="4.5" fill="var(--accent)" filter={`url(#${uid}-glow)`}>
                     <animateMotion
                       dur={`${1.8 + (i % 3) * 0.35}s`}
                       repeatCount="indefinite"
@@ -229,7 +229,7 @@ export function AnimatedDiagram({ spec }: { spec: FlowDiagramSpec }) {
                       : box.y + (box.kicker ? 38 : box.lines?.length ? 28 : box.h / 2 + 5)
                   }
                   textAnchor="middle"
-                  fill="white"
+                  fill="#171717"
                   fontSize={box.group ? 14 : 13}
                   fontWeight="600"
                 >
@@ -241,7 +241,7 @@ export function AnimatedDiagram({ spec }: { spec: FlowDiagramSpec }) {
                     x={cx}
                     y={box.y + (box.kicker ? 56 : 46) + li * 15}
                     textAnchor="middle"
-                    fill="rgba(255,255,255,0.55)"
+                    fill="rgba(23,23,23,0.58)"
                     fontSize="11"
                   >
                     {line}
@@ -252,7 +252,7 @@ export function AnimatedDiagram({ spec }: { spec: FlowDiagramSpec }) {
           })}
 
           {spec.notes?.map((n) => (
-            <text key={n.text} x={n.x} y={n.y} fill="rgba(255,255,255,0.4)" fontSize="11">
+            <text key={n.text} x={n.x} y={n.y} fill="rgba(23,23,23,0.45)" fontSize="11">
               {n.text}
             </text>
           ))}
@@ -260,7 +260,7 @@ export function AnimatedDiagram({ spec }: { spec: FlowDiagramSpec }) {
       </AnimatePresence>
 
       {spec.caption ? (
-        <p className="mt-4 text-[14px] leading-6 text-white/60">{spec.caption}</p>
+        <p className="mt-4 text-[14px] leading-6 text-ink/60">{spec.caption}</p>
       ) : null}
     </GlassCard>
   );

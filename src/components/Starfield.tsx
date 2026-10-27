@@ -54,8 +54,8 @@ export function Starfield() {
         }
         ctx.beginPath();
         ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-        // A few stars carry the accent's warmth; the rest are white.
-        ctx.fillStyle = s.r > 1.2 ? `rgba(255, 200, 160, ${alpha})` : `rgba(255, 255, 255, ${alpha})`;
+        // Light theme: faint grey stars, a few in the orange accent.
+        ctx.fillStyle = s.r > 1.2 ? `rgba(234, 88, 12, ${alpha * 0.55})` : `rgba(64, 64, 64, ${alpha * 0.4})`;
         ctx.fill();
       }
       if (!still) raf = requestAnimationFrame(draw);
