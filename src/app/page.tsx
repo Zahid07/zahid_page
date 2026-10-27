@@ -1,7 +1,13 @@
 import Link from "next/link";
+import { CountUp } from "@/components/CountUp";
 import { GlassCard } from "@/components/GlassCard";
+import { HeroName } from "@/components/HeroName";
+import { HowIWork } from "@/components/HowIWork";
 import { LocalTime } from "@/components/LocalTime";
+import { ProductShowcase } from "@/components/ProductShowcase";
 import { ProjectCard } from "@/components/ProjectCard";
+import { Reveal } from "@/components/Reveal";
+import { SourcesMarquee } from "@/components/SourcesMarquee";
 import { TechOrbit } from "@/components/TechOrbit";
 import { TraceCard } from "@/components/TraceCard";
 import { Typer } from "@/components/Typer";
@@ -34,18 +40,24 @@ export default function HomePage() {
       {/* Hero */}
       <section className="grid items-center gap-10 pb-14 pt-16 lg:grid-cols-[1.15fr_1fr] lg:pb-32 lg:pt-20">
         <div>
-          <LocalTime place={site.location} timeZone="Europe/Helsinki" />
+          <Reveal onLoad>
+            <LocalTime place={site.location} timeZone="Europe/Helsinki" />
+          </Reveal>
           <h1 className="mt-6 text-[clamp(3rem,7.5vw,5.6rem)] font-semibold leading-[0.95] tracking-[-0.045em]">
-            Hey, I&apos;m <span className="font-serif font-normal italic tracking-[-0.02em] text-[var(--accent)]">{firstName}.</span>
+            Hey, I&apos;m <HeroName text={`${firstName}.`} />
           </h1>
-          <p className="mt-5 max-w-xl text-[clamp(1.35rem,2.6vw,1.9rem)] font-medium leading-snug tracking-tight text-ink/85">
-            I build data platforms and AI agents you can trace to the last table.
-          </p>
-          <p className="mt-4">
-            <Typer words={building} />
-          </p>
-          <p className="mt-6 max-w-xl text-[16.5px] leading-7 text-ink/65">{site.summary}</p>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
+          <Reveal onLoad delay={0.25}>
+            <p className="mt-5 max-w-xl text-[clamp(1.35rem,2.6vw,1.9rem)] font-medium leading-snug tracking-tight text-ink/85">
+              I build data platforms and AI agents you can trace to the last table.
+            </p>
+            <p className="mt-4">
+              <Typer words={building} />
+            </p>
+          </Reveal>
+          <Reveal onLoad delay={0.4}>
+            <p className="mt-6 max-w-xl text-[16.5px] leading-7 text-ink/65">{site.summary}</p>
+          </Reveal>
+          <Reveal onLoad delay={0.55} className="mt-8 flex flex-wrap items-center gap-3">
             <Link href="#work" className="rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-medium text-white shadow-[0_8px_24px_-8px_oklch(0.646_0.222_41.116/0.7)] transition hover:brightness-110">
               Explore my work ↓
             </Link>
@@ -57,33 +69,57 @@ export default function HomePage() {
               <a href={site.github} target="_blank" rel="noreferrer" className="hover:text-ink">GitHub</a>
               <a href={site.linkedin} target="_blank" rel="noreferrer" className="hover:text-ink">LinkedIn</a>
             </span>
-          </div>
+          </Reveal>
         </div>
-        <div className="relative hidden lg:block">
+        <Reveal onLoad delay={0.3} className="relative hidden lg:block">
           <TechOrbit />
           <div className="absolute -bottom-24 -left-6">
             <TraceCard />
           </div>
-        </div>
+        </Reveal>
+      </section>
+
+      {/* A product window rising into place over the hero as you scroll */}
+      <section className="pb-10">
+        <ProductShowcase src="/shots/plainjoin/1.png" href="/projects/plainjoin" label="Plainjoin · AI self-service BI" />
       </section>
 
       {/* Stats */}
-      <section className="grid gap-3 border-y border-[var(--border)] py-8 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="relative mt-10 grid gap-3 border-y border-[var(--border)] py-10 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="halftone pointer-events-none absolute inset-0 -z-10" aria-hidden />
         {stats.map((s) => (
           <div key={s.v} className="px-1">
-            <p className="text-[2.2rem] font-semibold tracking-tight">{s.k}</p>
+            <p className="text-[2.2rem] font-semibold tracking-tight">
+              <CountUp value={s.k} />
+            </p>
             <p className="mt-0.5 text-[13.5px] leading-5 text-ink/55">{s.v}</p>
           </div>
         ))}
       </section>
 
+      <Reveal className="pt-12">
+        <SourcesMarquee />
+      </Reveal>
+
+      {/* How I work */}
+      <section className="pt-24">
+        <Reveal>
+          <SectionHead eyebrow="How I work" title="Ingest, model, serve." intro="Every system I build follows the same three moves. Hover a card to see each one move." />
+        </Reveal>
+        <Reveal delay={0.1}>
+          <HowIWork />
+        </Reveal>
+      </section>
+
       {/* Work */}
       <section id="work" className="scroll-mt-20 pt-24">
+        <Reveal>
         <SectionHead
           eyebrow="Selected work"
           title="Products I've built, and why."
           intro="Platforms from my jobs, products I run myself, and the agents I'm building now. Each one has a case study with screenshots and an animated architecture flow."
         />
+        </Reveal>
         <div className="grid gap-5 md:grid-cols-2">
           {featured.map((p, i) => (
             <ProjectCard key={p.slug} project={p} index={i} />
@@ -97,6 +133,7 @@ export default function HomePage() {
 
       {/* Experience */}
       <section id="experience" className="scroll-mt-20 pt-24">
+        <Reveal>
         <SectionHead eyebrow="Experience" title="Where I've done it." />
         <ol className="relative space-y-5 border-l border-[var(--border-strong)] pl-6 sm:pl-8">
           {experience.map((job) => (
@@ -123,10 +160,12 @@ export default function HomePage() {
         <p className="mt-6 text-[14.5px] text-ink/60">
           Full detail on the <Link href="/about" className="font-medium text-ink underline decoration-ink/25 underline-offset-4">about page</Link>. MSc Computer Science, Åbo Akademi University (expected May 2027) · BSc Computer Science, FAST NUCES.
         </p>
+        </Reveal>
       </section>
 
       {/* Expertise */}
       <section id="expertise" className="scroll-mt-20 pt-24">
+        <Reveal>
         <SectionHead eyebrow="Technical expertise" title="Tools I've shipped with, not just tried." />
         <div className="grid gap-4 md:grid-cols-2">
           {expertise.map((g) => (
@@ -155,10 +194,12 @@ export default function HomePage() {
             ))}
           </GlassCard>
         </div>
+        </Reveal>
       </section>
 
       {/* Hiring */}
       <section id="hiring" className="scroll-mt-20 pt-24">
+        <Reveal>
         <GlassCard className="overflow-hidden p-8 md:p-10" hover={false}>
           <div className="grid gap-8 md:grid-cols-[1.4fr_1fr]">
             <div>
@@ -190,10 +231,12 @@ export default function HomePage() {
             </div>
           </div>
         </GlassCard>
+        </Reveal>
       </section>
 
       {/* Contact */}
       <section id="contact" className="scroll-mt-20 pt-24">
+        <Reveal>
         <SectionHead eyebrow="Contact" title="Let's talk about your data." intro="Email or call. I reply within a day." />
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
@@ -208,6 +251,7 @@ export default function HomePage() {
             </a>
           ))}
         </div>
+        </Reveal>
       </section>
     </main>
   );
