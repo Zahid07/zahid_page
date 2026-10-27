@@ -14,7 +14,7 @@ export default function AboutPage() {
       <h1 className="mt-3 text-5xl font-semibold tracking-tight">{site.name}</h1>
       <p className="mt-5 max-w-2xl text-lg leading-8 text-white/70">{site.summary}</p>
       <p className="mt-3 text-white/55">
-        M.Sc. Computer Science, Åbo Akademi University · B.Sc. FAST NUCES
+        MSc Computer Science, Åbo Akademi University (expected May 2027) · BSc Computer Science, FAST NUCES
       </p>
 
       <div className="mt-12 grid gap-4 md:grid-cols-2">

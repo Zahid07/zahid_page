@@ -19,7 +19,7 @@ export function GlassCard({ children, className = "", href, hover = true }: Prop
   }, []);
 
   const style = { "--spot-x": "28%", "--spot-y": "18%" } as CSSProperties;
-  const cls = `glass specular rounded-[28px] ${hover ? "glass-hover" : ""} ${href ? "block" : ""} ${className}`;
+  const cls = `glass specular group rounded-[18px] ${hover ? "glass-hover" : ""} ${href ? "block" : ""} ${className}`;
 
   if (href) {
     return (

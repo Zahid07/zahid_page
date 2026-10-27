@@ -2,13 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens: the Plainjoin concept's dark theme (neutral oklch greys + one orange accent). */
 :root {
-  --bg: #05060a;
-  --fg: #f5f5f7;
-  --muted: #a1a1aa;
-  --line: rgba(255, 255, 255, 0.12);
-  --glass: rgba(255, 255, 255, 0.07);
-  --glass-strong: rgba(255, 255, 255, 0.12);
+  --bg: oklch(0.145 0 0);
+  --bg-soft: oklch(0.175 0 0);
+  --card: oklch(0.185 0 0 / 0.82);
+  --fg: oklch(0.985 0 0);
+  --muted: oklch(0.708 0 0);
+  --muted-2: oklch(0.556 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --border-strong: oklch(1 0 0 / 18%);
+  --accent: oklch(0.646 0.222 41.116);
+  --accent-soft: oklch(0.646 0.222 41.116 / 0.18);
+  --good: oklch(0.7 0.13 155);
+  --shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 12px 40px -12px oklch(0 0 0 / 0.6);
+  --shadow-lg: 0 2px 4px oklch(0 0 0 / 0.3), 0 40px 100px -30px oklch(0 0 0 / 0.85);
+  color-scheme: dark;
 }
 
 * {
@@ -27,69 +36,59 @@ body {
 
 body {
   min-height: 100vh;
-  font-feature-settings: "ss01" on, "cv11" on;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
 ::selection {
-  background: rgba(180, 210, 255, 0.28);
-  color: #fff;
+  background: var(--accent-soft);
+  color: var(--fg);
 }
 
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Fixed backdrop behind the starfield: a faint warm glow at the top, otherwise flat. */
 .atmosphere {
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  overflow: hidden;
   background:
-    radial-gradient(1200px 700px at 12% -10%, rgba(90, 140, 255, 0.22), transparent 55%),
-    radial-gradient(900px 600px at 88% 8%, rgba(180, 120, 255, 0.16), transparent 50%),
-    radial-gradient(800px 500px at 50% 110%, rgba(80, 200, 220, 0.12), transparent 45%),
-    #05060a;
+    radial-gradient(900px 520px at 50% -12%, oklch(0.646 0.222 41.116 / 0.10), transparent 60%),
+    var(--bg);
 }
 
-.atmosphere::after {
-  content: "";
-  position: absolute;
+.starfield {
+  position: fixed;
   inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.35'/%3E%3C/svg%3E");
-  opacity: 0.035;
-  mix-blend-mode: overlay;
+  z-index: 0;
+  pointer-events: none;
 }
 
+/* Card surface (kept under the old .glass name so every component picks it up). */
 .glass {
-  background: linear-gradient(
-    165deg,
-    rgba(255, 255, 255, 0.14) 0%,
-    rgba(255, 255, 255, 0.05) 38%,
-    rgba(255, 255, 255, 0.03) 100%
-  );
-  backdrop-filter: blur(40px) saturate(160%);
-  -webkit-backdrop-filter: blur(40px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  box-shadow:
-    0 10px 40px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 .glass-hover {
   transition:
-    transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 420ms ease,
-    background 420ms ease;
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 260ms ease,
+    box-shadow 260ms ease;
 }
 
 .glass-hover:hover {
-  transform: translateY(-6px) scale(1.012);
-  border-color: rgba(255, 255, 255, 0.32);
-  box-shadow:
-    0 28px 80px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.38),
-    0 0 0 1px rgba(255, 255, 255, 0.06);
+  transform: translateY(-3px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-lg);
 }
 
 .specular {
@@ -103,18 +102,55 @@ body {
   position: absolute;
   inset: -40%;
   background: radial-gradient(
-    420px 220px at var(--spot-x, 30%) var(--spot-y, 18%),
-    rgba(255, 255, 255, 0.28),
-    transparent 55%
+    360px 200px at var(--spot-x, 30%) var(--spot-y, 18%),
+    oklch(0.646 0.222 41.116 / 0.12),
+    transparent 60%
   );
   opacity: 0;
-  transition: opacity 280ms ease;
+  transition: opacity 240ms ease;
   pointer-events: none;
-  mix-blend-mode: screen;
 }
 
 .specular:hover::before {
   opacity: 1;
+}
+
+@layer components {
+/* Small mono label, e.g. "CONCEPT" / "LIVE" / "IN PROGRESS". */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--accent);
+}
+
+.pill-good::before {
+  background: var(--good);
+}
+
+.eyebrow {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 }
 
 .link-quiet {
@@ -147,9 +183,20 @@ body {
 }
 
 .prose-glass code {
-  @apply rounded-md bg-white/10 px-1.5 py-0.5 text-[13px] text-white;
+  @apply rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[13px] text-white;
 }
 
 .prose-glass a {
   @apply text-white underline decoration-white/25 underline-offset-4 hover:decoration-white;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .glass-hover,
+  .glass-hover:hover {
+    transition: none;
+    transform: none;
+  }
 }

@@ -663,6 +663,161 @@ export const architectures: Record<string, Architecture> = {
       },
     ],
   },
+  "ai-data-modeling-agent": {
+    caption:
+      "Business intent, existing reports and the live database each tell part of the truth. The agent records where they disagree and asks a person, instead of guessing.",
+    map: [
+      { label: "BPD + report SQL", sub: "uploads", tone: "source" },
+      { label: "Oracle", sub: "read-only", tone: "source" },
+      { label: "Evidence catalog", sub: "pgvector · MinIO", tone: "store" },
+      { label: "LLM roles", sub: "DeepSeek", tone: "process" },
+      { label: "Review", sub: "3 checkpoints", tone: "gate" },
+      { label: "Model + DDL", sub: "approved", tone: "serve" },
+    ],
+    stages: [
+      { n: "01", title: "Ingest", body: "Uploads are hash-verified and routed by type; parsing runs in parallel.", systems: ["MinIO", "FastAPI"] },
+      { n: "02", title: "Understand", body: "The Business Understanding role reads intent and processes; the SQL Reviewer extracts KPIs, sources, inferred joins and column origins, each with a citation.", systems: ["DeepSeek", "LangChain"] },
+      { n: "03", title: "Discover", body: "Scoped metadata discovery and typed profiling against Oracle, behind a SQL guard.", systems: ["python-oracledb"] },
+      { n: "04", title: "Propose and validate", body: "Design proposals are typed and committed transactionally; a deterministic rule engine checks structure and reconciles against the reports.", systems: ["PostgreSQL", "Rule engine"], gate: "Validation passes, or the proposal goes back." },
+      { n: "05", title: "Review and release", body: "Reviewers resolve issues and approve in the Next.js app. Only an approved version produces diagrams and Oracle DDL.", systems: ["Next.js", "React Flow"], gate: "Human approval before any DDL." },
+    ],
+    decisions: [
+      { title: "No source wins automatically", body: "A conflict between documents, reports and data is recorded and decided by the business, not resolved silently by the model." },
+      { title: "Code owns the dangerous parts", body: "Database access, commits, validation and release are deterministic services. The model proposes; it never writes." },
+      { title: "Checkpoints are not approvals", body: "LangGraph checkpoints track run progress. Approved model state lives in its own immutable versions." },
+    ],
+  },
+  "ai-analytics-agent": {
+    caption:
+      "Learn the warehouse once, deliberately, then answer from that memory. Every answer shows its work and is checked against numbers the business already trusts.",
+    map: [
+      { label: "Warehouse", sub: "MySQL", tone: "source" },
+      { label: "Learning agents", sub: "tool calling", tone: "process" },
+      { label: "Memory", sub: "pgvector", tone: "store" },
+      { label: "Read-only guard", sub: "5 layers", tone: "gate" },
+      { label: "Answer", sub: "reconciled", tone: "serve" },
+    ],
+    stages: [
+      { n: "01", title: "Discover", body: "Tables, columns, keys and indexes, read from the warehouse.", systems: ["Connector"] },
+      { n: "02", title: "Catalog", body: "An agent writes the meaning of every table and column, flags PII and states the grain, in batches of three tables.", systems: ["LLM tool calling"] },
+      { n: "03", title: "Relationships", body: "Joins are proposed and verified against the data, query history and BI definitions.", systems: ["Metabase", "LookML"] },
+      { n: "04", title: "Semantic layer", body: "Metrics first, then the glossary and default filters.", systems: ["Semantic agent"] },
+      { n: "05", title: "Answer", body: "Retrieve from memory, plan SQL from metadata only, run it read-only, reconcile against dashboards.", systems: ["pgvector", "FastAPI"], gate: "Read-only, enforced in five independent layers." },
+    ],
+    decisions: [
+      { title: "Nothing is learned automatically", body: "Each learning step is started on purpose and shows progress, the item in hand and the time left." },
+      { title: "Metadata, not rows, goes to the model", body: "The LLM plans SQL from what was learned; the data stays in the warehouse." },
+      { title: "Dashboards are ground truth", body: "An answer that disagrees with a trusted Metabase number is a bug to explain, not an insight." },
+    ],
+  },
+  plainjoin: {
+    caption:
+      "Self-service BI where a trusted number is compiled, not generated, and everything else says so on the label.",
+    map: [
+      { label: "PostgreSQL · Athena", sub: "read-only", tone: "source" },
+      { label: "Reports + notes", sub: "knowledge", tone: "store" },
+      { label: "Metric contracts", sub: "certified", tone: "process" },
+      { label: "SQL gate", sub: "single guard", tone: "gate" },
+      { label: "Dashboards", sub: "shared", tone: "serve" },
+    ],
+    stages: [
+      { n: "01", title: "Connect and discover", body: "Credentials are encrypted per workspace. Discovery reads schemas; PostgreSQL keys come from source constraints.", systems: ["PostgreSQL", "Athena"] },
+      { n: "02", title: "Import knowledge", body: "Report SQL is dry-run with EXPLAIN on import, then indexed with embeddings and text search.", systems: ["pgvector"] },
+      { n: "03", title: "Certify", body: "Metrics become contracts. Join cardinality is measured from data before it is trusted.", systems: ["Semantic layer"], gate: "Only certified metrics produce Certified answers." },
+      { n: "04", title: "Ask", body: "Certified answers compile from the contract; others are drafted by the model, labelled Exploratory and reviewed before running.", systems: ["LM Studio", "SQL guard"] },
+      { n: "05", title: "Keep it honest", body: "Golden questions with reference SQL re-run after every change.", systems: ["Evaluation"] },
+    ],
+    decisions: [
+      { title: "Compiled beats generated", body: "When a metric is certified, the model does not write its SQL. The contract does." },
+      { title: "One gate for every query", body: "Certified or exploratory, everything goes through the same read-only guard." },
+      { title: "Knowledge is data", body: "Customer bundles carry reports, metrics and glossary without secrets, and import idempotently." },
+    ],
+  },
+  studydeck: {
+    caption:
+      "A document pipeline that turns uploads into study material, split so the slow work never slows the fast API.",
+    map: [
+      { label: "Uploads", sub: "PDF · photos", tone: "source" },
+      { label: "API", sub: "Cloud Run", tone: "process" },
+      { label: "Cloud Tasks", sub: "dispatch", tone: "gate" },
+      { label: "Workers", sub: "page · note · diagram · embed", tone: "process" },
+      { label: "Cloud SQL", sub: "pgvector", tone: "store" },
+    ],
+    stages: [
+      { n: "01", title: "Triage and plan", body: "Page triage, structure detection and a note planner decide what each document needs.", systems: ["FastAPI", "PyMuPDF"] },
+      { n: "02", title: "Extract", body: "The page worker runs vision extraction on Vertex AI Gemini.", systems: ["Vertex AI"] },
+      { n: "03", title: "Write", body: "The note worker writes notes and scores coverage; the diagram worker draws diagrams.", systems: ["Gemini"] },
+      { n: "04", title: "Embed", body: "Chunks are embedded with text-embedding-004 for retrieval.", systems: ["pgvector HNSW"] },
+      { n: "05", title: "Study", body: "Notes, flashcards, quizzes and mock papers, with spaced review of what the student gets wrong.", systems: ["Cloud SQL"] },
+    ],
+    decisions: [
+      { title: "Split by workload shape", body: "A minutes-long pipeline and a seconds-long API had one memory ceiling and one always-on bill. Each now scales on its own." },
+      { title: "Write the decision down first", body: "The split was planned in a decision record, stage by stage, before any code moved." },
+    ],
+  },
+  whowantswhat: {
+    caption:
+      "A marketplace and storefront platform where the schema, the money and the sign-in are all built to be audited.",
+    map: [
+      { label: "Next.js", sub: "server-rendered", tone: "source" },
+      { label: "Firebase Auth", sub: "ID tokens", tone: "gate" },
+      { label: "FastAPI", sub: "Cloud Run", tone: "process" },
+      { label: "PostgreSQL", sub: "51 migrations", tone: "store" },
+      { label: "History", sub: "SCD Type 4", tone: "store" },
+    ],
+    stages: [
+      { n: "01", title: "Sign in", body: "Firebase handles passwords and Google sign-in; the backend verifies each ID token and issues its own session.", systems: ["Firebase"] },
+      { n: "02", title: "Serve", body: "Public pages render on the server with canonical URLs, share images and JSON-LD.", systems: ["Next.js"] },
+      { n: "03", title: "Migrate on start", body: "Pending SQL migrations apply in one transaction behind a lock, safe across concurrent instances.", systems: ["PostgreSQL"], gate: "Tests fail if migrations and models disagree." },
+      { n: "04", title: "Keep history", body: "Triggers copy every change into history tables; an audit export explains every order line's money.", systems: ["Triggers"] },
+    ],
+    decisions: [
+      { title: "Never edit a migration that ran", body: "Schema changes are new numbered files, so every database tells the same story." },
+      { title: "Secrets never reach the browser", body: "An allow-list decides the five public values the frontend may read at runtime." },
+    ],
+  },
+  "hci-lab-thesis": {
+    caption:
+      "One traceable timeline for sensors, video, audio and robot state, where raw records never change and access is scoped to the study.",
+    map: [
+      { label: "Sensors + robot", sub: "LSL", tone: "source" },
+      { label: "Gateway", sub: "record IDs", tone: "process" },
+      { label: "Kafka", sub: "live", tone: "process" },
+      { label: "XDF archive", sub: "published", tone: "gate" },
+      { label: "ClickHouse", sub: "immutable", tone: "store" },
+      { label: "Replay + BI", sub: "study-scoped", tone: "serve" },
+    ],
+    stages: [
+      { n: "01", title: "Check readiness", body: "Before the start marker: expected streams, channel configs, LabRecorder writing, cameras recording, disk headroom.", systems: ["LabRecorder"] },
+      { n: "02", title: "Record", body: "Streams flow live through the gateway and Kafka; media goes to object storage with only its index in the pipeline.", systems: ["Kafka", "PyAV"] },
+      { n: "03", title: "Publish", body: "After the session, the XDF archive is imported, validated, and published by writing one session row.", systems: ["pyxdf", "ClickHouse"], gate: "Validate before publishing; never delete first." },
+      { n: "04", title: "Replay and detect", body: "Frame-accurate replay, live views and anomaly detection on the published timeline.", systems: ["MediaMTX", "Superset"] },
+    ],
+    decisions: [
+      { title: "Aligned time is derived", body: "Each stream keeps its source timestamps; a versioned clock fit is applied at read time, not stored as a second copy." },
+      { title: "Alerts are not safety", body: "Only an independent safety controller can stop the robot." },
+    ],
+  },
+  "mobile-games": {
+    caption:
+      "Many games, one backend: shared sign-in, and a server-side catalog that changes the game without a store release.",
+    map: [
+      { label: "Godot 4 apps", sub: "Android", tone: "source" },
+      { label: "Firebase", sub: "shared sign-in", tone: "gate" },
+      { label: "FastAPI", sub: "GCP", tone: "process" },
+      { label: "Catalog", sub: "server-side", tone: "process" },
+      { label: "PostgreSQL", sub: "per-game tables", tone: "store" },
+    ],
+    stages: [
+      { n: "01", title: "Sign in once", body: "One Google account works in every WhoWantsWhat Solutions app.", systems: ["Firebase Auth"] },
+      { n: "02", title: "Load the catalog", body: "Worlds, levels, power-ups, cosmetics, story and prices come from GET /catalog.", systems: ["FastAPI"] },
+      { n: "03", title: "Check on the server", body: "Results are validated and coins charged server-side.", systems: ["PostgreSQL"], gate: "The client is never the source of truth." },
+    ],
+    decisions: [
+      { title: "Content is a deploy, not a release", body: "Tuning a level or a price ships in minutes without waiting for store review." },
+      { title: "Deletion is in the app", body: "Players can delete their game data in-app, as Google Play requires, and keep their shared sign-in." },
+    ],
+  },
 };
 
 export function getArchitecture(slug: string) {
